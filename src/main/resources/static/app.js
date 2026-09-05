@@ -1,3 +1,8 @@
+// Configuración del Servidor Backend (Kotlin)
+// Cambia esto a la URL de tu servidor en Render/Railway cuando lo subas a la nube.
+// Ejemplo: const API_BASE_URL = 'https://mi-servidor-kotlin.onrender.com';
+const API_BASE_URL = ''; // En blanco ('') significa localhost si se sirve desde el mismo servidor
+
 // Generate or retrieve a unique client ID
 function getClientId() {
     let id = localStorage.getItem('hw_client_id');
@@ -31,7 +36,8 @@ let pollingInterval;
 function startPolling() {
     pollingInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/data/${clientId}`);
+            const endpoint = `${API_BASE_URL}/api/data/${clientId}`;
+            const response = await fetch(endpoint);
             if (response.ok) {
                 const data = await response.json();
                 handleData(data);
