@@ -21,23 +21,22 @@
         </header>
 
         <div id="setup-section" class="section active">
-            <h2>Instalación Requerida</h2>
+            <h2>Instalación Rápida</h2>
             <p>Para analizar el hardware a bajo nivel, detectar la salud de la memoria RAM y el estado S.M.A.R.T de los discos, se requiere ejecutar un agente local.</p>
             <p><strong>Sistema Operativo Detectado:</strong> <span id="os-detected">Detectando...</span></p>
+            
             <div class="download-card">
-                <h3>1. Descarga el Agente</h3>
-                <p>Es un script de Python ligero que enviará los datos en tiempo real.</p>
-                <a href="/download-agent" class="btn btn-primary" id="download-btn">Descargar agent.py</a>
-            </div>
-            <div class="download-card mt-4">
-                <h3>2. Ejecútalo</h3>
-                <div class="code-block">
-                    <code>pip install psutil websocket-client wmi<br>python agent.py <span id="client-id-display"></span></code>
+                <h3>1. Ejecuta el Analizador</h3>
+                <p>Descarga y abre este archivo. Instalará las dependencias necesarias y se conectará automáticamente.</p>
+                <div id="download-buttons" style="margin-top: 15px;">
+                    <!-- Botones generados dinámicamente -->
                 </div>
             </div>
+            
             <div class="waiting-spinner">
                 <div class="spinner"></div>
                 <p>Esperando conexión del agente...</p>
+                <p style="font-size: 12px; opacity: 0.7;">(ID de Cliente: <span id="client-id-display"></span>)</p>
             </div>
         </div>
 

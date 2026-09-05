@@ -16,15 +16,95 @@ function getClientId() {
 const clientId = getClientId();
 document.getElementById('client-id-display').innerText = clientId;
 
-// Basic OS Detection
+// Basic OS Detection & Script Generation
 function detectOS() {
     const userAgent = window.navigator.userAgent;
     let os = "Desconocido";
-    if (userAgent.indexOf("Win") !== -1) os = "Windows";
+    let isWindows = false;
+    
+    if (userAgent.indexOf("Win") !== -1) { os = "Windows"; isWindows = true; }
     if (userAgent.indexOf("Mac") !== -1) os = "MacOS";
     if (userAgent.indexOf("Linux") !== -1) os = "Linux";
     
     document.getElementById('os-detected').innerText = os;
+    
+    // Resolve the actual server URL. If API_BASE_URL is empty, use window.location.origin
+    // But since agent needs a websocket URL, we convert http/https to ws/wss.
+    // For the dynamic download, we assume the server is running on the API_BASE_URL.
+    // NOTE: The python agent connects via WebSocket.
+    let serverHttpUrl = API_BASE_URL || "http://localhost:8080";
+    let serverWsUrl = serverHttpUrl.replace("http://", "ws://").replace("https://", "wss://");
+
+    // We will download agent.py from this very same static site (Firebase)
+    let agentDownloadUrl = window.location.origin + "/agent.py";
+    
+    const downloadContainer = document.getElementById('download-buttons');
+    downloadContainer.innerHTML = '';
+
+    if (isWindows || os === "Desconocido") {
+        const batContent = `@echo off
+echo =========================================
+echo Analizador de Hardware - Instalacion
+echo =========================================
+echo.
+echo 1. Instalando dependencias de Python (psutil, websocket-client, wmi)...
+pip install psutil websocket-client wmi >nul 2>&1
+
+echo 2. Descargando motor de analisis...
+curl -s -o hw_agent.py "${agentDownloadUrl}"
+
+echo 3. Ejecutando y conectando al dashboard...
+echo Por favor, no cierres esta ventana mientras monitoreas.
+python hw_agent.py ${clientId} ${serverWsUrl}
+pause
+`;
+        const blob = new Blob([batContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'AnalizadorHardware.bat';
+        a.className = 'btn btn-primary';
+        a.innerHTML = 'Descargar para Windows (.bat)';
+        a.style.marginRight = '10px';
+        downloadContainer.appendChild(a);
+    }
+    
+    if (!isWindows || os === "Desconocido") {
+        const shContent = `#!/bin/bash
+echo "========================================="
+echo "Analizador de Hardware - Instalacion"
+echo "========================================="
+echo ""
+echo "1. Instalando dependencias de Python..."
+pip3 install psutil websocket-client >/dev/null 2>&1
+
+echo "2. Descargando motor de analisis..."
+curl -s -o hw_agent.py "${agentDownloadUrl}"
+
+echo "3. Ejecutando y conectando al dashboard..."
+echo "Por favor, no cierres esta ventana mientras monitoreas."
+python3 hw_agent.py ${clientId} ${serverWsUrl}
+`;
+        const blob = new Blob([shContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'AnalizadorHardware.command';
+        a.className = 'btn btn-primary';
+        a.style.backgroundColor = '#4b5563'; // Darker for Mac/Linux distinction
+        a.innerHTML = 'Descargar para Mac/Linux';
+        downloadContainer.appendChild(a);
+        
+        if (!isWindows) {
+            const p = document.createElement('p');
+            p.style.fontSize = '12px';
+            p.style.marginTop = '10px';
+            p.innerHTML = '<i>Nota: Después de descargar, puede que necesites darle permisos ejecutando <code>chmod +x AnalizadorHardware.command</code> en tu terminal, o haciendo click derecho -> Abrir.</i>';
+            downloadContainer.appendChild(p);
+        }
+    }
 }
 
 detectOS();
