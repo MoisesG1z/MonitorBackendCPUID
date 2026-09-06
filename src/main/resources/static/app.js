@@ -1,7 +1,7 @@
 // Configuración del Servidor Backend (Kotlin)
 // Cambia esto a la URL de tu servidor en Render/Railway cuando lo subas a la nube.
 // Ejemplo: const API_BASE_URL = 'https://mi-servidor-kotlin.onrender.com';
-const API_BASE_URL = ''; // En blanco ('') significa localhost si se sirve desde el mismo servidor
+const API_BASE_URL = 'https://monitorbackendcpuid.onrender.com'; // Enlace al servidor de Render
 
 // Generate or retrieve a unique client ID
 function getClientId() {
