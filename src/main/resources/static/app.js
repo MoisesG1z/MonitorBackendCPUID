@@ -131,7 +131,7 @@ function startPolling() {
     pollingInterval = setInterval(async () => {
         try {
             const endpoint = `${API_BASE_URL}/api/data/${clientId}`;
-            const response = await fetch(endpoint);
+            const response = await fetch(endpoint, { mode: 'cors' });
             if (response.ok) {
                 const data = await response.json();
                 handleData(data);
