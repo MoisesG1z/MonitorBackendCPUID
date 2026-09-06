@@ -188,11 +188,13 @@ function handleData(data) {
     let gpuHtml = '';
     if (data.gpu && data.gpu.length > 0) {
         data.gpu.forEach(g => {
+            const vramText = g.memoryTotal > 0 ? `${g.memoryTotal} MB` : 'Memoria Compartida del Sistema';
+            const loadText = g.load > 0 ? `${g.load}%` : 'Activa (Integrada / Sistema)';
             gpuHtml += `
-                <p><strong>Dispositivo:</strong> ${g.name}</p>
-                <p><strong>Carga:</strong> ${g.load}%</p>
-                <p><strong>Memoria:</strong> ${g.memoryTotal}MB Total / ${g.memoryUsed}MB Usado</p>
-                <hr style="border-color: rgba(255,255,255,0.1); margin: 5px 0;">
+                <p><strong>Dispositivo:</strong> <span style="color: #60a5fa; font-weight: 600;">${g.name}</span></p>
+                <p><strong>Estado / Carga:</strong> ${loadText}</p>
+                <p><strong>Memoria VRAM:</strong> ${vramText}</p>
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 8px 0;">
             `;
         });
     } else {

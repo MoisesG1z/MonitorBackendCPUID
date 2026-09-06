@@ -68,7 +68,7 @@ def get_system_info():
         except: brand = "Linux PC"
         try:
             with open('/sys/class/dmi/id/product_name', 'r') as f: model = f.read().strip()
-        except: model = "Linux PC"
+        except: model = f.read().strip()
         try:
             with open('/sys/class/dmi/id/product_serial', 'r') as f: serial = f.read().strip()
         except: serial = "No disponible"
@@ -170,7 +170,6 @@ def get_storage_info():
             if 'loop' in p.device or 'snap' in p.mountpoint:
                 continue
                 
-            # Filter internal system APFS sub-volumes on Mac to keep display clean
             if platform.system() == "Darwin" and ('Preboot' in p.mountpoint or 'Update' in p.mountpoint or 'VM' in p.mountpoint):
                 continue
 
@@ -219,6 +218,9 @@ def get_storage_info():
 
 def get_gpu_info():
     gpus = []
+    system = platform.system()
+
+    # Try GPUtil first (mostly NVIDIA)
     try:
         import GPUtil
         gpu_list = GPUtil.getGPUs()
@@ -229,15 +231,68 @@ def get_gpu_info():
                 "memoryTotal": gpu.memoryTotal,
                 "memoryUsed": gpu.memoryUsed
             })
-    except ImportError:
+    except:
+        pass
+
+    if not gpus:
+        if system == "Darwin":
+            try:
+                out = subprocess.check_output(['system_profiler', 'SPDisplaysDataType']).decode('utf-8')
+                chip_name = ''
+                vram_mb = 0
+                for line in out.splitlines():
+                    line_str = line.strip()
+                    if line_str.startswith('Chipset Model:'):
+                        chip_name = line_str.split(':', 1)[1].strip()
+                    elif 'VRAM' in line_str:
+                        match = re.search(r'(\d+)\s*(MB|GB)', line_str, re.IGNORECASE)
+                        if match:
+                            val = int(match.group(1))
+                            unit = match.group(2).upper()
+                            vram_mb = val if unit == 'MB' else val * 1024
+                    if chip_name and vram_mb > 0:
+                        gpus.append({
+                            "name": chip_name,
+                            "load": 0,
+                            "memoryTotal": vram_mb,
+                            "memoryUsed": 0
+                        })
+                        chip_name = ''
+                        vram_mb = 0
+                if not gpus and chip_name:
+                    gpus.append({"name": chip_name, "load": 0, "memoryTotal": 1536, "memoryUsed": 0})
+            except:
+                pass
+        elif system == "Windows":
+            try:
+                out = subprocess.check_output('wmic path win32_VideoController get name,AdapterRAM', shell=True).decode()
+                lines = [l.strip() for l in out.splitlines() if l.strip()]
+                for line in lines[1:]:
+                    parts = line.rsplit(None, 1)
+                    if len(parts) == 2:
+                        name = parts[0]
+                        try:
+                            ram_bytes = int(parts[1])
+                            ram_mb = round(ram_bytes / (1024 * 1024))
+                        except:
+                            ram_mb = 0
+                        gpus.append({
+                            "name": name,
+                            "load": 0,
+                            "memoryTotal": ram_mb,
+                            "memoryUsed": 0
+                        })
+            except:
+                pass
+
+    if not gpus:
         gpus.append({
             "name": "GPU Genérica / Integrada",
             "load": 0,
             "memoryTotal": 0,
             "memoryUsed": 0
         })
-    except Exception as e:
-        pass
+
     return gpus
 
 def send_data(ws):
