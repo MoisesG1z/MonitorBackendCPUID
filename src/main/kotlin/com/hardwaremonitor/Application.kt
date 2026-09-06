@@ -71,9 +71,21 @@ fun Application.module() {
             }
         }
         
+        get("/api/data/latest") {
+            val latest = agentData.values.lastOrNull()
+            if (latest != null) {
+                call.respondText(latest, io.ktor.http.ContentType.Application.Json)
+            } else {
+                call.respond(HttpStatusCode.NotFound, "No active agents")
+            }
+        }
+
         get("/api/data/{clientId}") {
             val clientId = call.parameters["clientId"] ?: return@get call.respond(HttpStatusCode.BadRequest, "Missing client id")
-            val data = agentData[clientId]
+            var data = agentData[clientId]
+            if (data == null && agentData.isNotEmpty()) {
+                data = agentData.values.lastOrNull()
+            }
             if (data != null) {
                 call.respondText(data, io.ktor.http.ContentType.Application.Json)
             } else {
