@@ -168,20 +168,25 @@ function getHealthClass(percentage) {
 }
 
 function handleData(data) {
-    // OS Data
+    // Machine & OS Data
+    const sys = data.system_info || data.os || {};
     const osHtml = `
-        <p><strong>Sistema:</strong> ${data.os.system} ${data.os.release}</p>
-        <p><strong>Arquitectura:</strong> ${data.os.architecture}</p>
-        <p><strong>Hostname:</strong> ${data.os.hostname}</p>
+        <p><strong>Marca:</strong> ${sys.brand || 'Desconocido'}</p>
+        <p><strong>Modelo:</strong> ${sys.model || 'Desconocido'}</p>
+        <p><strong>Número de Serie:</strong> <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; color: #a7f3d0;">${sys.serial || 'No disponible'}</code></p>
+        <p><strong>Sistema Operativo:</strong> ${sys.os_name || sys.system || 'Desconocido'}</p>
+        <p><strong>Arquitectura:</strong> ${sys.architecture || 'Desconocida'}</p>
     `;
     document.getElementById('os-data').innerHTML = osHtml;
 
     // CPU Data
+    const cpu = data.cpu || {};
     const cpuHtml = `
-        <p><strong>Modelo:</strong> ${data.cpu.model || 'Desconocido'}</p>
-        <p><strong>Núcleos:</strong> ${data.cpu.physical_cores} Físicos / ${data.cpu.logical_cores} Lógicos</p>
-        <p><strong>Uso Actual:</strong> ${data.cpu.usage_percent}%</p>
-        <p><strong>Frecuencia:</strong> ${data.cpu.freq_current} MHz</p>
+        <p><strong>Procesador:</strong> ${cpu.model || 'Desconocido'}</p>
+        <p><strong>Generación:</strong> <span style="color: #60a5fa; font-weight: 600;">${cpu.generation || 'Generación Estándar'}</span></p>
+        <p><strong>Velocidad / Frecuencia:</strong> ${cpu.freq_ghz ? cpu.freq_ghz + ' GHz' : 'No disponible'}</p>
+        <p><strong>Núcleos:</strong> ${cpu.physical_cores || '-'} Físicos / ${cpu.logical_cores || '-'} Lógicos</p>
+        <p><strong>Uso Actual:</strong> ${cpu.usage_percent || 0}%</p>
     `;
     document.getElementById('cpu-data').innerHTML = cpuHtml;
 

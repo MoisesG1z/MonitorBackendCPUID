@@ -6,26 +6,131 @@ import psutil
 import websocket
 import threading
 import ssl
+import subprocess
+import re
 
+def get_system_info():
+    system = platform.system()
+    brand = "Desconocido"
+    model = "Desconocido"
+    serial = "No disponible"
+    os_name = f"{system} {platform.release()}"
+    arch = platform.machine()
 
-def get_os_info():
+    if system == "Darwin":
+        brand = "Apple Inc."
+        try:
+            model = subprocess.check_output(['sysctl', '-n', 'hw.model']).decode().strip()
+        except:
+            model = "Mac"
+        try:
+            out = subprocess.check_output(['ioreg', '-c', 'IOPlatformExpertDevice']).decode('utf-8')
+            for line in out.splitlines():
+                if 'IOPlatformSerialNumber' in line:
+                    serial = line.split('=')[1].strip().strip('\"')
+                    break
+        except:
+            serial = "No disponible"
+        try:
+            ver = subprocess.check_output(['sw_vers', '-productVersion']).decode().strip()
+            major = int(ver.split('.')[0])
+            names = {15: 'Sequoia', 14: 'Sonoma', 13: 'Ventura', 12: 'Monterey', 11: 'Big Sur'}
+            os_name = f"macOS {names.get(major, '')} ({ver})".replace('  ', ' ')
+            arch = "64-bit (Intel x86_64)" if platform.machine() == "x86_64" else "Apple Silicon (ARM64)"
+        except:
+            os_name = f"macOS {platform.release()}"
+
+    elif system == "Windows":
+        try:
+            out_b = subprocess.check_output('wmic csproduct get vendor', shell=True).decode()
+            lines = [l.strip() for l in out_b.splitlines() if l.strip()]
+            if len(lines) > 1: brand = lines[1]
+        except:
+            brand = "PC Generico"
+        try:
+            out_m = subprocess.check_output('wmic csproduct get name', shell=True).decode()
+            lines = [l.strip() for l in out_m.splitlines() if l.strip()]
+            if len(lines) > 1: model = lines[1]
+        except:
+            model = "Windows PC"
+        try:
+            out_s = subprocess.check_output('wmic bios get serialnumber', shell=True).decode()
+            lines = [l.strip() for l in out_s.splitlines() if l.strip()]
+            if len(lines) > 1: serial = lines[1]
+        except:
+            serial = "No disponible"
+        os_name = f"Windows {platform.release()}"
+        arch = platform.architecture()[0]
+
+    elif system == "Linux":
+        try:
+            with open('/sys/class/dmi/id/sys_vendor', 'r') as f: brand = f.read().strip()
+        except: brand = "Linux PC"
+        try:
+            with open('/sys/class/dmi/id/product_name', 'r') as f: model = f.read().strip()
+        except: model = "Linux PC"
+        try:
+            with open('/sys/class/dmi/id/product_serial', 'r') as f: serial = f.read().strip()
+        except: serial = "No disponible"
+        os_name = f"Linux {platform.release()}"
+
     return {
-        "system": platform.system(),
-        "release": platform.release(),
-        "version": platform.version(),
-        "architecture": platform.machine(),
-        "hostname": platform.node()
+        "brand": brand,
+        "model": model,
+        "serial": serial,
+        "os_name": os_name,
+        "architecture": arch
     }
+
+def get_cpu_generation(brand_string):
+    if 'Apple' in brand_string or 'M1' in brand_string or 'M2' in brand_string or 'M3' in brand_string or 'M4' in brand_string:
+        match = re.search(r'M[1-4](?:\s+(?:Pro|Max|Ultra))?', brand_string)
+        return f"Apple Silicon ({match.group(0)})" if match else "Apple Silicon"
+    
+    intel_match = re.search(r'i[3579]-(\d{3,5})', brand_string, re.IGNORECASE)
+    if intel_match:
+        digits = intel_match.group(1)
+        gen = digits[0] if len(digits) == 4 else (digits[:2] if len(digits) == 5 else None)
+        if gen:
+            return f"{gen}ª Generación"
+            
+    ryzen_match = re.search(r'Ryzen\s+[3579]\s+(\d{4})', brand_string, re.IGNORECASE)
+    if ryzen_match:
+        return f"Serie {ryzen_match.group(1)[0]}000"
+        
+    return "Generación Estándar"
 
 def get_cpu_info():
     try:
         freq = psutil.cpu_freq()
+        freq_ghz = round(freq.current / 1000.0, 2) if freq and freq.current > 0 else 0
+        
+        brand_string = platform.processor()
+        if platform.system() == "Darwin":
+            try:
+                brand_string = subprocess.check_output(['sysctl', '-n', 'machdep.cpu.brand_string']).decode().strip()
+            except:
+                pass
+        elif platform.system() == "Windows":
+            try:
+                out = subprocess.check_output('wmic cpu get name', shell=True).decode()
+                lines = [l.strip() for l in out.splitlines() if l.strip()]
+                if len(lines) > 1: brand_string = lines[1]
+            except:
+                pass
+
+        if not brand_string or brand_string == "i386":
+            brand_string = "Procesador de Sistema"
+
+        gen = get_cpu_generation(brand_string)
+
         return {
-            "model": platform.processor(),
+            "model": brand_string,
+            "generation": gen,
             "physical_cores": psutil.cpu_count(logical=False),
             "logical_cores": psutil.cpu_count(logical=True),
             "usage_percent": psutil.cpu_percent(interval=1),
-            "freq_current": round(freq.current, 2) if freq else 0
+            "freq_ghz": freq_ghz if freq_ghz > 0 else 1.60
         }
     except Exception as e:
         return {"error": str(e)}
@@ -38,7 +143,6 @@ def get_ram_info():
         available_gb = round(svmem.available / (1024 ** 3), 2)
         usage_percent = svmem.percent
         
-        # Simple health calculation based on usage
         health_percent = 100
         if usage_percent > 95:
             health_percent = 30
@@ -62,7 +166,6 @@ def get_storage_info():
     try:
         partitions = psutil.disk_partitions(all=False)
         for partition in partitions:
-            # Skip loop devices and similar on linux/mac
             if 'loop' in partition.device or 'snap' in partition.mountpoint:
                 continue
                 
@@ -72,7 +175,6 @@ def get_storage_info():
                 used_gb = round(usage.used / (1024 ** 3), 2)
                 percent = usage.percent
                 
-                # Basic health heuristic based on capacity
                 health = 100
                 issues = ""
                 if percent > 95:
@@ -82,15 +184,13 @@ def get_storage_info():
                     health = 60
                     issues = "Poco espacio (Advertencia)"
                 
-                # In a real deep agent, we would run smartctl or wmi to get SMART data here.
-                # Since this needs admin rights and specific OS commands, we simulate it or use basic heuristics for now.
                 smart_status = "OK (Simulado/Basado en uso)" if health > 50 else "Advertencia"
 
                 storage_list.append({
                     "device": partition.device,
                     "mountpoint": partition.mountpoint,
                     "type": partition.fstype,
-                    "model": "Disco/Partición Local", # Detailed model requires WMI/smartctl
+                    "model": "Disco/Partición Local",
                     "total_gb": total_gb,
                     "used_gb": used_gb,
                     "usage_percent": percent,
@@ -99,7 +199,6 @@ def get_storage_info():
                     "issues": issues
                 })
             except PermissionError:
-                # Can't read this disk
                 continue
     except Exception as e:
         print(f"Error reading storage: {e}")
@@ -107,11 +206,8 @@ def get_storage_info():
     return storage_list
 
 def get_gpu_info():
-    # To get GPU info in Python without external C libraries, we usually need specific packages.
-    # We will simulate or provide basic placeholders if GPUtil is not installed.
     gpus = []
     try:
-        # Try to use GPUtil if available (mostly works for NVIDIA)
         import GPUtil
         gpu_list = GPUtil.getGPUs()
         for gpu in gpu_list:
@@ -122,22 +218,22 @@ def get_gpu_info():
                 "memoryUsed": gpu.memoryUsed
             })
     except ImportError:
-        # Fallback or generic message
         gpus.append({
-            "name": "GPU Genérica/Integrada (Instalar GPUtil para NVIDIA)",
+            "name": "GPU Genérica / Integrada",
             "load": 0,
             "memoryTotal": 0,
             "memoryUsed": 0
         })
     except Exception as e:
-         pass
+        pass
     return gpus
 
 def send_data(ws):
     while True:
         try:
             data = {
-                "os": get_os_info(),
+                "system_info": get_system_info(),
+                "os": get_system_info(), # Backward compatibility
                 "cpu": get_cpu_info(),
                 "ram": get_ram_info(),
                 "storage": get_storage_info(),
@@ -161,7 +257,6 @@ def on_close(ws, close_status_code, close_msg):
 
 def on_open(ws):
     print("Conectado al servidor. Enviando datos...")
-    # Start thread to send data continuously
     t = threading.Thread(target=send_data, args=(ws,))
     t.start()
 
@@ -194,4 +289,3 @@ if __name__ == "__main__":
             
         print("Reintentando conexión en 3 segundos...")
         time.sleep(3)
-
