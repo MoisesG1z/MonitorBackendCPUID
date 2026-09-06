@@ -16,15 +16,59 @@ function getClientId() {
 const clientId = getClientId();
 document.getElementById('client-id-display').innerText = clientId;
 
+// Cross-Browser Copy Helper
+function copyToClipboard(text, btn) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            showCopySuccess(btn);
+        }).catch(() => {
+            fallbackCopy(text, btn);
+        });
+    } else {
+        fallbackCopy(text, btn);
+    }
+}
+
+function fallbackCopy(text, btn) {
+    try {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "0";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        showCopySuccess(btn);
+    } catch (e) {
+        alert("Comando: " + text);
+    }
+}
+
+function showCopySuccess(btn) {
+    if (!btn) return;
+    btn.innerHTML = '✅ ¡Copiado!';
+    btn.style.backgroundColor = '#10b981';
+    setTimeout(() => {
+        btn.innerHTML = '📋 Copiar Comando';
+        btn.style.backgroundColor = '#2563eb';
+    }, 2500);
+}
+
 // Basic OS Detection & Script Generation
 function detectOS() {
-    const userAgent = window.navigator.userAgent;
+    const userAgent = window.navigator.userAgent || window.navigator.vendor || window.opera;
     let os = "Desconocido";
     let isWindows = false;
-    
-    if (userAgent.indexOf("Win") !== -1) { os = "Windows"; isWindows = true; }
-    if (userAgent.indexOf("Mac") !== -1) os = "MacOS";
-    if (userAgent.indexOf("Linux") !== -1) os = "Linux";
+    let isMobile = false;
+
+    if (/android/i.test(userAgent)) { os = "Android Móvil"; isMobile = true; }
+    else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) { os = "iOS (iPhone/iPad)"; isMobile = true; }
+    else if (userAgent.indexOf("Win") !== -1) { os = "Windows"; isWindows = true; }
+    else if (userAgent.indexOf("Mac") !== -1) { os = "MacOS"; }
+    else if (userAgent.indexOf("Linux") !== -1) { os = "Linux"; }
     
     document.getElementById('os-detected').innerText = os;
     
@@ -37,9 +81,9 @@ function detectOS() {
 
     let terminalCmd = "";
     if (isWindows) {
-        terminalCmd = `curl -sL "${agentDownloadUrl}?v=3.1" -o hw_agent.py && pip install psutil websocket-client wmi >nul 2>&1 && python hw_agent.py ${clientId} ${serverWsUrl}`;
+        terminalCmd = `curl -sL "${agentDownloadUrl}?v=4.0" -o hw_agent.py && pip install psutil websocket-client wmi >nul 2>&1 && python hw_agent.py ${clientId} ${serverWsUrl}`;
     } else {
-        terminalCmd = `curl -sL "${agentDownloadUrl}?v=3.1" -o hw_agent.py && pip3 install psutil websocket-client >/dev/null 2>&1 && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
+        terminalCmd = `curl -sL "${agentDownloadUrl}?v=4.0" -o hw_agent.py && pip3 install psutil websocket-client >/dev/null 2>&1 && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
     }
 
     const wrapper = document.createElement('div');
@@ -50,7 +94,14 @@ function detectOS() {
     wrapper.style.marginTop = '10px';
     wrapper.style.textAlign = 'left';
 
+    const mobileNotice = isMobile ? `
+        <div style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 12px; color: #93c5fd;">
+            📱 <strong>Dispositivo Móvil Detectado:</strong> Puedes monitorear el dashboard desde este móvil. Copia el comando y envíalo a la PC o Mac que deseas analizar.
+        </div>
+    ` : '';
+
     wrapper.innerHTML = `
+        ${mobileNotice}
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
             <span style="font-size: 13px; font-weight: 600; color: #60a5fa;">💻 Comando de inicio rápido para ${os}:</span>
             <button id="copy-cmd-btn" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; background-color: #2563eb; transition: all 0.2s;">
@@ -58,22 +109,12 @@ function detectOS() {
             </button>
         </div>
         <code id="cmd-text" style="display: block; background: #0f172a; padding: 14px; border-radius: 8px; font-size: 12px; color: #a7f3d0; word-break: break-all; font-family: monospace; border: 1px solid rgba(255,255,255,0.08); line-height: 1.5;">${terminalCmd}</code>
-        <p style="font-size: 12px; opacity: 0.8; margin-top: 10px; margin-bottom: 0;">💡 Abre tu <strong>Terminal</strong> (o Símbolo del sistema), pega este comando y presiona <strong>Enter</strong>.</p>
+        <p style="font-size: 12px; opacity: 0.8; margin-top: 10px; margin-bottom: 0;">💡 Abre la <strong>Terminal</strong> (o Símbolo del sistema en PC), pega este comando y presiona <strong>Enter</strong>.</p>
     `;
     downloadContainer.appendChild(wrapper);
 
     document.getElementById('copy-cmd-btn').addEventListener('click', function() {
-        navigator.clipboard.writeText(terminalCmd).then(() => {
-            const btn = document.getElementById('copy-cmd-btn');
-            btn.innerHTML = '✅ ¡Copiado!';
-            btn.style.backgroundColor = '#10b981';
-            setTimeout(() => {
-                btn.innerHTML = '📋 Copiar Comando';
-                btn.style.backgroundColor = '#2563eb';
-            }, 2500);
-        }).catch(err => {
-            console.error('Error copying command:', err);
-        });
+        copyToClipboard(terminalCmd, this);
     });
 }
 
