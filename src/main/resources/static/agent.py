@@ -5,6 +5,8 @@ import platform
 import psutil
 import websocket
 import threading
+import ssl
+
 
 def get_os_info():
     return {
@@ -184,4 +186,4 @@ if __name__ == "__main__":
                               on_error=on_error,
                               on_close=on_close)
 
-    ws.run_forever()
+    ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
