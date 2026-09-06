@@ -42,8 +42,10 @@ fun Application.module() {
     }
 
     routing {
-        // Serve static files (HTML, CSS, JS)
-        staticResources("/", "static")
+        // Health check endpoint for UptimeRobot
+        get("/") {
+            call.respondText("Server is up and running!")
+        }
         
         // Serve the Python agent download
         get("/download-agent") {
