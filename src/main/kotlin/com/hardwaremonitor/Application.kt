@@ -22,12 +22,25 @@ fun main() {
         .start(wait = true)
 }
 
+import io.ktor.server.plugins.cors.routing.*
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpHeaders
+
 // Store active websocket sessions (Client ID -> Session)
 val activeConnections = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
 // Store latest data from agents (Client ID -> JSON Data)
 val agentData = ConcurrentHashMap<String, String>()
 
 fun Application.module() {
+    install(CORS) {
+        anyHost()
+        allowHeader(HttpHeaders.ContentType)
+        allowHeader(HttpHeaders.Authorization)
+        allowMethod(HttpMethod.Options)
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Post)
+    }
+
     install(WebSockets) {
         pingPeriod = Duration.ofSeconds(15)
         timeout = Duration.ofSeconds(15)

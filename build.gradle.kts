@@ -27,5 +27,6 @@ dependencies {
     implementation("io.ktor:ktor-server-freemarker-jvm:$ktor_version")
     implementation("io.ktor:ktor-server-content-negotiation-jvm:$ktor_version")
     implementation("io.ktor:ktor-serialization-gson-jvm:$ktor_version")
+    implementation("io.ktor:ktor-server-cors-jvm:$ktor_version")
     implementation("ch.qos.logback:logback-classic:$logback_version")
 }
