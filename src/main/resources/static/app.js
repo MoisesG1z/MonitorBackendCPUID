@@ -28,97 +28,53 @@ function detectOS() {
     
     document.getElementById('os-detected').innerText = os;
     
-    // Resolve the actual server URL. If API_BASE_URL is empty, use window.location.origin
-    // But since agent needs a websocket URL, we convert http/https to ws/wss.
-    // For the dynamic download, we assume the server is running on the API_BASE_URL.
-    // NOTE: The python agent connects via WebSocket.
     let serverHttpUrl = API_BASE_URL || "http://localhost:8080";
     let serverWsUrl = serverHttpUrl.replace("http://", "ws://").replace("https://", "wss://");
-
-    // We will download agent.py from this very same static site (Firebase)
     let agentDownloadUrl = window.location.origin + "/agent.py";
     
     const downloadContainer = document.getElementById('download-buttons');
     downloadContainer.innerHTML = '';
 
-    if (isWindows || os === "Desconocido") {
-        const batContent = `@echo off
-echo =========================================
-echo Analizador de Hardware - Instalacion
-echo =========================================
-echo.
-echo 1. Instalando dependencias de Python (psutil, websocket-client, wmi)...
-pip install psutil websocket-client wmi >nul 2>&1
-
-echo 2. Descargando motor de analisis...
-curl -s -o hw_agent.py "${agentDownloadUrl}"
-
-echo 3. Ejecutando y conectando al dashboard...
-echo Por favor, no cierres esta ventana mientras monitoreas.
-python hw_agent.py ${clientId} ${serverWsUrl}
-pause
-`;
-        const blob = new Blob([batContent], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'AnalizadorHardware.bat';
-        a.className = 'btn btn-primary';
-        a.innerHTML = 'Descargar para Windows (.bat)';
-        a.style.marginRight = '10px';
-        downloadContainer.appendChild(a);
+    let terminalCmd = "";
+    if (isWindows) {
+        terminalCmd = `curl -sL "${agentDownloadUrl}" -o hw_agent.py && pip install psutil websocket-client wmi >nul 2>&1 && python hw_agent.py ${clientId} ${serverWsUrl}`;
+    } else {
+        terminalCmd = `curl -sL "${agentDownloadUrl}" -o hw_agent.py && pip3 install psutil websocket-client >/dev/null 2>&1 && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
     }
-    
-    if (!isWindows || os === "Desconocido") {
-        const shContent = `#!/bin/bash
-echo "========================================="
-echo "Analizador de Hardware - Instalacion"
-echo "========================================="
-echo ""
-echo "1. Instalando dependencias de Python..."
-pip3 install psutil websocket-client >/dev/null 2>&1
 
-echo "2. Descargando motor de analisis..."
-curl -s -o hw_agent.py "${agentDownloadUrl}"
+    const wrapper = document.createElement('div');
+    wrapper.style.background = 'rgba(0, 0, 0, 0.4)';
+    wrapper.style.border = '1px solid rgba(255, 255, 255, 0.15)';
+    wrapper.style.borderRadius = '10px';
+    wrapper.style.padding = '16px';
+    wrapper.style.marginTop = '10px';
+    wrapper.style.textAlign = 'left';
 
-echo "3. Ejecutando y conectando al dashboard..."
-echo "Por favor, no cierres esta ventana mientras monitoreas."
-python3 hw_agent.py ${clientId} ${serverWsUrl}
-`;
-        const blob = new Blob([shContent], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'AnalizadorHardware.command';
-        a.className = 'btn btn-primary';
-        a.style.backgroundColor = '#4b5563'; // Darker for Mac/Linux distinction
-        a.innerHTML = 'Descargar para Mac/Linux';
-        downloadContainer.appendChild(a);
-        
-        if (!isWindows) {
-            const terminalCmd = `curl -sL "${agentDownloadUrl}" -o hw_agent.py && pip3 install psutil websocket-client >/dev/null 2>&1 && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
-            
-            const div = document.createElement('div');
-            div.style.marginTop = '15px';
-            div.style.background = 'rgba(0, 0, 0, 0.4)';
-            div.style.padding = '12px';
-            div.style.borderRadius = '8px';
-            div.style.textAlign = 'left';
-            div.innerHTML = `
-                <p style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #60a5fa;">💡 ¿macOS bloqueó el doble clic?</p>
-                <p style="font-size: 12px; margin-bottom: 8px; opacity: 0.9;">Abre tu <strong>Terminal</strong> (Cmd + Espacio, escribe Terminal) y ejecuta cualquiera de estas dos opciones:</p>
-                
-                <p style="font-size: 12px; margin-bottom: 4px;"><strong>Opción A (Dar permiso al archivo descargado):</strong></p>
-                <code style="display: block; background: #1e293b; padding: 6px 10px; border-radius: 4px; font-size: 11px; margin-bottom: 10px; color: #a7f3d0; word-break: break-all;">chmod +x ~/Downloads/AnalizadorHardware.command</code>
-                
-                <p style="font-size: 12px; margin-bottom: 4px;"><strong>Opción B (Ejecutar directo con 1 comando):</strong></p>
-                <code style="display: block; background: #1e293b; padding: 6px 10px; border-radius: 4px; font-size: 11px; color: #a7f3d0; word-break: break-all;">${terminalCmd}</code>
-            `;
-            downloadContainer.appendChild(div);
-        }
-    }
+    wrapper.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+            <span style="font-size: 13px; font-weight: 600; color: #60a5fa;">💻 Comando de inicio rápido para ${os}:</span>
+            <button id="copy-cmd-btn" class="btn btn-primary" style="padding: 8px 16px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; background-color: #2563eb; transition: all 0.2s;">
+                📋 Copiar Comando
+            </button>
+        </div>
+        <code id="cmd-text" style="display: block; background: #0f172a; padding: 14px; border-radius: 8px; font-size: 12px; color: #a7f3d0; word-break: break-all; font-family: monospace; border: 1px solid rgba(255,255,255,0.08); line-height: 1.5;">${terminalCmd}</code>
+        <p style="font-size: 12px; opacity: 0.8; margin-top: 10px; margin-bottom: 0;">💡 Abre tu <strong>Terminal</strong> (o Símbolo del sistema), pega este comando y presiona <strong>Enter</strong>.</p>
+    `;
+    downloadContainer.appendChild(wrapper);
+
+    document.getElementById('copy-cmd-btn').addEventListener('click', function() {
+        navigator.clipboard.writeText(terminalCmd).then(() => {
+            const btn = document.getElementById('copy-cmd-btn');
+            btn.innerHTML = '✅ ¡Copiado!';
+            btn.style.backgroundColor = '#10b981';
+            setTimeout(() => {
+                btn.innerHTML = '📋 Copiar Comando';
+                btn.style.backgroundColor = '#2563eb';
+            }, 2500);
+        }).catch(err => {
+            console.error('Error copying command:', err);
+        });
+    });
 }
 
 detectOS();
