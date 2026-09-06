@@ -10,26 +10,25 @@ import io.ktor.server.response.*
 import io.ktor.server.http.content.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.serialization.gson.*
+import io.ktor.server.plugins.cors.routing.*
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import java.time.Duration
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-import io.ktor.http.HttpStatusCode
 import java.io.File
+
+// Store active websocket sessions (Client ID -> Session)
+val activeConnections = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
+// Store latest data from agents (Client ID -> JSON Data)
+val agentData = ConcurrentHashMap<String, String>()
 
 fun main() {
     val port = System.getenv("PORT")?.toInt() ?: 8080
     embeddedServer(Netty, port = port, host = "0.0.0.0", module = Application::module)
         .start(wait = true)
 }
-
-import io.ktor.server.plugins.cors.routing.*
-import io.ktor.http.HttpMethod
-import io.ktor.http.HttpHeaders
-
-// Store active websocket sessions (Client ID -> Session)
-val activeConnections = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
-// Store latest data from agents (Client ID -> JSON Data)
-val agentData = ConcurrentHashMap<String, String>()
 
 fun Application.module() {
     install(CORS) {
@@ -97,22 +96,20 @@ fun Application.module() {
         webSocket("/ws/agent/{clientId}") {
             val clientId = call.parameters["clientId"] ?: return@webSocket
             activeConnections[clientId] = this
-            println("Agent connected: \$clientId")
+            println("Agent connected: $clientId")
             
             try {
                 for (frame in incoming) {
                     if (frame is Frame.Text) {
                         val text = frame.readText()
                         agentData[clientId] = text
-                        // Here we could also broadcast to connected web UI clients if we wanted real-time push
                     }
                 }
             } catch (e: Exception) {
-                println("Error with client \$clientId: \${e.message}")
+                println("Error with client $clientId: ${e.message}")
             } finally {
-                println("Agent disconnected: \$clientId")
+                println("Agent disconnected: $clientId")
                 activeConnections.remove(clientId)
-                // We keep the last known data in agentData for now, or clear it if offline
             }
         }
     }
