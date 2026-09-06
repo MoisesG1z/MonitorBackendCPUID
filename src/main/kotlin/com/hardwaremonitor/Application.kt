@@ -110,6 +110,7 @@ fun Application.module() {
             } finally {
                 println("Agent disconnected: $clientId")
                 activeConnections.remove(clientId)
+                agentData.remove(clientId)
             }
         }
     }

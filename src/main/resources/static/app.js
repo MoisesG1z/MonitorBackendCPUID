@@ -151,6 +151,8 @@ function startPolling() {
                 // Connection lost or no data
                 document.getElementById('status-badge').innerText = 'Esperando agente...';
                 document.getElementById('status-badge').className = 'badge status-waiting';
+                document.getElementById('dashboard-section').classList.remove('active');
+                document.getElementById('setup-section').classList.add('active');
                 isConnected = false;
             }
         } catch (e) {
