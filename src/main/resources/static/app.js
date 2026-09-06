@@ -98,11 +98,25 @@ python3 hw_agent.py ${clientId} ${serverWsUrl}
         downloadContainer.appendChild(a);
         
         if (!isWindows) {
-            const p = document.createElement('p');
-            p.style.fontSize = '12px';
-            p.style.marginTop = '10px';
-            p.innerHTML = '<i>Nota: Después de descargar, puede que necesites darle permisos ejecutando <code>chmod +x AnalizadorHardware.command</code> en tu terminal, o haciendo click derecho -> Abrir.</i>';
-            downloadContainer.appendChild(p);
+            const terminalCmd = `curl -sL "${agentDownloadUrl}" -o hw_agent.py && pip3 install psutil websocket-client >/dev/null 2>&1 && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
+            
+            const div = document.createElement('div');
+            div.style.marginTop = '15px';
+            div.style.background = 'rgba(0, 0, 0, 0.4)';
+            div.style.padding = '12px';
+            div.style.borderRadius = '8px';
+            div.style.textAlign = 'left';
+            div.innerHTML = `
+                <p style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #60a5fa;">💡 ¿macOS bloqueó el doble clic?</p>
+                <p style="font-size: 12px; margin-bottom: 8px; opacity: 0.9;">Abre tu <strong>Terminal</strong> (Cmd + Espacio, escribe Terminal) y ejecuta cualquiera de estas dos opciones:</p>
+                
+                <p style="font-size: 12px; margin-bottom: 4px;"><strong>Opción A (Dar permiso al archivo descargado):</strong></p>
+                <code style="display: block; background: #1e293b; padding: 6px 10px; border-radius: 4px; font-size: 11px; margin-bottom: 10px; color: #a7f3d0; word-break: break-all;">chmod +x ~/Downloads/AnalizadorHardware.command</code>
+                
+                <p style="font-size: 12px; margin-bottom: 4px;"><strong>Opción B (Ejecutar directo con 1 comando):</strong></p>
+                <code style="display: block; background: #1e293b; padding: 6px 10px; border-radius: 4px; font-size: 11px; color: #a7f3d0; word-break: break-all;">${terminalCmd}</code>
+            `;
+            downloadContainer.appendChild(div);
         }
     }
 }
