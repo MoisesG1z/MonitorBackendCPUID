@@ -244,27 +244,53 @@ function handleData(data) {
     }
     document.getElementById('gpu-data').innerHTML = gpuHtml;
 
-    // Storage Data
+    // Storage Data (Grouped by Disks with Health Status)
     let storageHtml = '';
     if (data.storage && data.storage.length > 0) {
         data.storage.forEach(d => {
+            // Check if grouped format or flat partition format
+            const isGrouped = d.disk_name !== undefined && d.partitions !== undefined;
+            const diskName = isGrouped ? d.disk_name : (d.device || 'Disco Local');
             const diskHealth = d.health_percent !== undefined ? d.health_percent : 100;
             const hClass = getHealthClass(diskHealth);
+            const statusText = d.smart_status || 'OK';
+
+            const partitionsList = isGrouped ? d.partitions : [{
+                mountpoint: d.mountpoint || d.device || '/',
+                device: d.device || '',
+                type: d.type || 'local',
+                used_gb: d.used_gb || 0,
+                total_gb: d.total_gb || 0,
+                usage_percent: d.usage_percent || 0
+            }];
+
             storageHtml += `
-                <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; margin-bottom: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                        <strong style="font-size: 16px;">${d.device} (${d.type})</strong>
-                        <span class="health-indicator ${hClass}" style="margin:0; padding: 4px 8px; font-size:12px;">Salud: ${diskHealth}%</span>
+                <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); padding: 14px; border-radius: 10px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; margin-bottom: 10px;">
+                        <strong style="font-size: 15px; color: #f8fafc;">💾 Dispositivo: <span style="color: #60a5fa;">${diskName}</span></strong>
+                        <span class="health-indicator ${hClass}" style="margin:0; padding: 4px 10px; font-size: 12px; font-weight: 600;">
+                            Salud: ${diskHealth}% (${statusText})
+                        </span>
                     </div>
-                    <p style="margin:0; font-size:13px;"><strong>Modelo:</strong> ${d.model}</p>
-                    <p style="margin:0; font-size:13px;"><strong>Tamaño:</strong> ${d.total_gb} GB (Usado: ${d.used_gb} GB)</p>
-                    ${d.smart_status ? `<p style="margin:0; font-size:13px;"><strong>Estado SMART:</strong> ${d.smart_status}</p>` : ''}
-                    ${d.issues ? `<p style="margin:2px 0 0 0; font-size:13px; color:#f87171;"><strong>Problemas:</strong> ${d.issues}</p>` : ''}
+                    <div>
+                        <p style="font-weight: 600; font-size: 12px; color: #94a3b8; margin-bottom: 6px;">Particiones en este dispositivo:</p>
+                        ${partitionsList.map(p => `
+                            <div style="background: rgba(255,255,255,0.05); padding: 8px 12px; border-radius: 6px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+                                <div>
+                                    <strong style="color: #38bdf8;">📁 ${p.mountpoint}</strong>
+                                    <span style="font-size: 11px; opacity: 0.7; margin-left: 6px;">(${p.device} - ${p.type})</span>
+                                </div>
+                                <div style="text-align: right; font-size: 12px;">
+                                    <strong>${p.used_gb} GB / ${p.total_gb} GB</strong> <span style="opacity: 0.8;">(${p.usage_percent}% usado)</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
             `;
         });
     } else {
-        storageHtml = '<p>Buscando discos...</p>';
+        storageHtml = '<p>Buscando dispositivos de almacenamiento...</p>';
     }
     document.getElementById('storage-data').innerHTML = storageHtml;
 }

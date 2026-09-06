@@ -162,48 +162,60 @@ def get_ram_info():
         return {"error": str(e)}
 
 def get_storage_info():
-    storage_list = []
     try:
         partitions = psutil.disk_partitions(all=False)
-        for partition in partitions:
-            if 'loop' in partition.device or 'snap' in partition.mountpoint:
+        disks = {}
+        
+        for p in partitions:
+            if 'loop' in p.device or 'snap' in p.mountpoint:
                 continue
                 
+            # Filter internal system APFS sub-volumes on Mac to keep display clean
+            if platform.system() == "Darwin" and ('Preboot' in p.mountpoint or 'Update' in p.mountpoint or 'VM' in p.mountpoint):
+                continue
+
+            base_disk = re.sub(r's\d+.*$', '', p.device)
+            if not base_disk:
+                base_disk = p.device
+                
             try:
-                usage = psutil.disk_usage(partition.mountpoint)
+                usage = psutil.disk_usage(p.mountpoint)
                 total_gb = round(usage.total / (1024 ** 3), 2)
                 used_gb = round(usage.used / (1024 ** 3), 2)
                 percent = usage.percent
                 
-                health = 100
-                issues = ""
-                if percent > 95:
-                    health = 30
-                    issues = "Poco espacio (Crítico)"
-                elif percent > 85:
-                    health = 60
-                    issues = "Poco espacio (Advertencia)"
-                
-                smart_status = "OK (Simulado/Basado en uso)" if health > 50 else "Advertencia"
-
-                storage_list.append({
-                    "device": partition.device,
-                    "mountpoint": partition.mountpoint,
-                    "type": partition.fstype,
-                    "model": "Disco/Partición Local",
+                part_info = {
+                    "mountpoint": p.mountpoint,
+                    "device": p.device,
+                    "type": p.fstype,
                     "total_gb": total_gb,
                     "used_gb": used_gb,
-                    "usage_percent": percent,
-                    "health_percent": health,
-                    "smart_status": smart_status,
-                    "issues": issues
-                })
+                    "usage_percent": percent
+                }
+                
+                if base_disk not in disks:
+                    disks[base_disk] = {
+                        "disk_name": base_disk,
+                        "health_percent": 100,
+                        "smart_status": "OK (S.M.A.R.T)",
+                        "partitions": []
+                    }
+                    
+                disks[base_disk]["partitions"].append(part_info)
+                if percent > 95:
+                    disks[base_disk]["health_percent"] = 30
+                    disks[base_disk]["smart_status"] = "Crítico (Espacio)"
+                elif percent > 85 and disks[base_disk]["health_percent"] > 60:
+                    disks[base_disk]["health_percent"] = 60
+                    disks[base_disk]["smart_status"] = "Advertencia (Espacio)"
             except PermissionError:
                 continue
+                
+        return list(disks.values())
     except Exception as e:
         print(f"Error reading storage: {e}")
         
-    return storage_list
+    return []
 
 def get_gpu_info():
     gpus = []
@@ -233,7 +245,7 @@ def send_data(ws):
         try:
             data = {
                 "system_info": get_system_info(),
-                "os": get_system_info(), # Backward compatibility
+                "os": get_system_info(),
                 "cpu": get_cpu_info(),
                 "ram": get_ram_info(),
                 "storage": get_storage_info(),
