@@ -8,6 +8,7 @@ import threading
 import ssl
 import subprocess
 import re
+import os
 
 def get_system_info():
     system = platform.system()
@@ -44,35 +45,103 @@ def get_system_info():
         try:
             out_b = subprocess.check_output('wmic csproduct get vendor', shell=True).decode()
             lines = [l.strip() for l in out_b.splitlines() if l.strip()]
-            if len(lines) > 1: brand = lines[1]
+            if len(lines) > 1 and lines[1]: brand = lines[1]
         except:
             brand = "PC Generico"
         try:
             out_m = subprocess.check_output('wmic csproduct get name', shell=True).decode()
             lines = [l.strip() for l in out_m.splitlines() if l.strip()]
-            if len(lines) > 1: model = lines[1]
+            if len(lines) > 1 and lines[1]: model = lines[1]
         except:
             model = "Windows PC"
         try:
             out_s = subprocess.check_output('wmic bios get serialnumber', shell=True).decode()
             lines = [l.strip() for l in out_s.splitlines() if l.strip()]
-            if len(lines) > 1: serial = lines[1]
+            if len(lines) > 1 and lines[1] and lines[1] != 'To be filled by O.E.M.': serial = lines[1]
         except:
-            serial = "No disponible"
+            pass
+        if serial == "No disponible":
+            try:
+                out_b = subprocess.check_output('wmic baseboard get serialnumber', shell=True).decode()
+                lines = [l.strip() for l in out_b.splitlines() if l.strip()]
+                if len(lines) > 1 and lines[1]: serial = lines[1]
+            except:
+                pass
         os_name = f"Windows {platform.release()}"
         arch = platform.architecture()[0]
 
     elif system == "Linux":
-        try:
-            with open('/sys/class/dmi/id/sys_vendor', 'r') as f: brand = f.read().strip()
-        except: brand = "Linux PC"
-        try:
-            with open('/sys/class/dmi/id/product_name', 'r') as f: model = f.read().strip()
-        except: model = "Linux PC"
-        try:
-            with open('/sys/class/dmi/id/product_serial', 'r') as f: serial = f.read().strip()
-        except: serial = "No disponible"
-        
+        # 1. Brand Brute Force
+        for path in ['/sys/class/dmi/id/sys_vendor', '/sys/class/dmi/id/board_vendor']:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        val = f.read().strip()
+                        if val and val not in ["To Be Filled By O.E.M.", "System manufacturer"]:
+                            brand = val
+                            break
+                except: pass
+        if brand == "Desconocido":
+            try:
+                out = subprocess.check_output("hostnamectl 2>/dev/null | grep 'Hardware Vendor:'", shell=True).decode()
+                if out: brand = out.split(':', 1)[1].strip()
+            except: pass
+
+        # 2. Model Brute Force
+        for path in ['/sys/class/dmi/id/product_name', '/sys/class/dmi/id/board_name', '/sys/class/dmi/id/product_family']:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        val = f.read().strip()
+                        if val and val not in ["To Be Filled By O.E.M.", "System Product Name"]:
+                            model = val
+                            break
+                except: pass
+        if model == "Desconocido":
+            try:
+                out = subprocess.check_output("hostnamectl 2>/dev/null | grep 'Hardware Model:'", shell=True).decode()
+                if out: model = out.split(':', 1)[1].strip()
+            except: pass
+
+        # 3. Serial Number Brute Force
+        for path in [
+            '/sys/class/dmi/id/product_serial',
+            '/sys/class/dmi/id/chassis_serial',
+            '/sys/class/dmi/id/board_serial',
+            '/sys/devices/virtual/dmi/id/product_serial',
+            '/sys/firmware/devicetree/base/serial-number'
+        ]:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        val = f.read().strip()
+                        if val and val not in ["To Be Filled By O.E.M.", "None", "00000000", "Default string", "System Serial Number"]:
+                            serial = val
+                            break
+                except: pass
+
+        if serial == "No disponible":
+            try:
+                out = subprocess.check_output("sudo -n dmidecode -s system-serial-number 2>/dev/null || dmidecode -s system-serial-number 2>/dev/null", shell=True).decode().strip()
+                if out and out not in ["To Be Filled By O.E.M.", "None", "00000000", "Default string"]:
+                    serial = out
+            except: pass
+
+        if serial == "No disponible":
+            try:
+                out = subprocess.check_output("udevadm info --query=property --name=/dev/sda 2>/dev/null | grep ID_SERIAL_SHORT=", shell=True).decode().strip()
+                if out:
+                    serial = out.split('=')[1].strip()
+            except: pass
+
+        if serial == "No disponible":
+            try:
+                with open('/etc/machine-id', 'r') as f:
+                    mid = f.read().strip()
+                    if mid:
+                        serial = f"ID-{mid[:12].upper()}"
+            except: pass
+
         os_name = f"Linux {platform.release()}"
         try:
             with open('/etc/os-release', 'r') as f:
@@ -80,8 +149,7 @@ def get_system_info():
                     if line.startswith('PRETTY_NAME='):
                         os_name = line.split('=', 1)[1].strip().strip('"')
                         break
-        except:
-            pass
+        except: pass
 
     return {
         "brand": brand,
@@ -92,6 +160,8 @@ def get_system_info():
     }
 
 def get_cpu_generation(brand_string):
+    if not brand_string:
+        return ""
     if 'Apple' in brand_string or 'M1' in brand_string or 'M2' in brand_string or 'M3' in brand_string or 'M4' in brand_string:
         match = re.search(r'M[1-4](?:\s+(?:Pro|Max|Ultra))?', brand_string)
         return f"Apple Silicon ({match.group(0)})" if match else "Apple Silicon"
@@ -101,45 +171,67 @@ def get_cpu_generation(brand_string):
         digits = intel_match.group(1)
         gen = digits[0] if len(digits) == 4 else (digits[:2] if len(digits) == 5 else None)
         if gen:
-            return f"{gen}ª Generación"
+            return f"{gen}ª Generación Intel"
             
     ryzen_match = re.search(r'Ryzen\s+[3579]\s+(\d{4})', brand_string, re.IGNORECASE)
     if ryzen_match:
-        return f"Serie {ryzen_match.group(1)[0]}000"
+        return f"AMD Ryzen Serie {ryzen_match.group(1)[0]}000"
         
-    return "Generación Estándar"
+    return ""
 
 def get_cpu_info():
     try:
         freq = psutil.cpu_freq()
         freq_ghz = round(freq.current / 1000.0, 2) if freq and freq.current > 0 else 0
         
-        brand_string = platform.processor()
-        if platform.system() == "Darwin":
+        brand_string = ""
+        system = platform.system()
+
+        if system == "Linux":
+            # 1. Read /proc/cpuinfo for Model Name
+            try:
+                with open('/proc/cpuinfo', 'r') as f:
+                    for line in f:
+                        if 'model name' in line:
+                            brand_string = line.split(':', 1)[1].strip()
+                            break
+            except: pass
+            
+            # 2. lscpu fallback
+            if not brand_string:
+                try:
+                    out = subprocess.check_output("lscpu 2>/dev/null | grep 'Model name:'", shell=True).decode()
+                    if out:
+                        brand_string = out.split(':', 1)[1].strip()
+                except: pass
+
+        elif system == "Darwin":
             try:
                 brand_string = subprocess.check_output(['sysctl', '-n', 'machdep.cpu.brand_string']).decode().strip()
-            except:
-                pass
-        elif platform.system() == "Windows":
+            except: pass
+
+        elif system == "Windows":
             try:
                 out = subprocess.check_output('wmic cpu get name', shell=True).decode()
                 lines = [l.strip() for l in out.splitlines() if l.strip()]
                 if len(lines) > 1: brand_string = lines[1]
-            except:
-                pass
+            except: pass
 
-        if not brand_string or brand_string == "i386":
-            brand_string = "Procesador de Sistema"
+        if not brand_string or brand_string.lower() in ["x86_64", "i386", "arm64", "unknown"]:
+            brand_string = platform.processor() or "Procesador Intel / AMD"
+
+        # Clean extra whitespace
+        brand_string = re.sub(r'\s+', ' ', brand_string).strip()
 
         gen = get_cpu_generation(brand_string)
 
         return {
             "model": brand_string,
-            "generation": gen,
-            "physical_cores": psutil.cpu_count(logical=False),
-            "logical_cores": psutil.cpu_count(logical=True),
+            "generation": gen if gen != "Generación Estándar" else "",
+            "physical_cores": psutil.cpu_count(logical=False) or 1,
+            "logical_cores": psutil.cpu_count(logical=True) or 1,
             "usage_percent": psutil.cpu_percent(interval=1),
-            "freq_ghz": freq_ghz if freq_ghz > 0 else 1.60
+            "freq_ghz": freq_ghz if freq_ghz > 0 else 2.0
         }
     except Exception as e:
         return {"error": str(e)}
@@ -171,65 +263,142 @@ def get_ram_info():
         return {"error": str(e)}
 
 def get_storage_info():
-    try:
-        partitions = psutil.disk_partitions(all=False)
-        disks = {}
-        
-        for p in partitions:
-            if 'loop' in p.device or 'snap' in p.mountpoint:
-                continue
-                
-            if platform.system() == "Darwin" and ('Preboot' in p.mountpoint or 'Update' in p.mountpoint or 'VM' in p.mountpoint):
-                continue
+    system = platform.system()
+    disks_dict = {}
 
-            base_disk = re.sub(r's\d+.*$', '', p.device)
-            if not base_disk:
-                base_disk = p.device
+    # Step 1: Detect physical disks on Linux via lsblk or /sys/block
+    if system == "Linux":
+        try:
+            out = subprocess.check_output("lsblk -b -P -o NAME,MODEL,VENDOR,SIZE,TYPE,MOUNTPOINT,FSTYPE 2>/dev/null", shell=True).decode()
+            for line in out.splitlines():
+                items = dict(re.findall(r'([A-Z_]+)="([^"]*)"', line))
+                dev_name = items.get('NAME', '')
+                dev_type = items.get('TYPE', '')
+                vendor = items.get('VENDOR', '').strip()
+                model = items.get('MODEL', '').strip()
+                size_bytes = int(items.get('SIZE', 0)) if items.get('SIZE', '').isdigit() else 0
+                size_gb = round(size_bytes / (1024**3), 2) if size_bytes > 0 else 0
                 
-            try:
-                usage = psutil.disk_usage(p.mountpoint)
-                total_gb = round(usage.total / (1024 ** 3), 2)
-                used_gb = round(usage.used / (1024 ** 3), 2)
-                percent = usage.percent
-                
-                part_info = {
-                    "mountpoint": p.mountpoint,
-                    "device": p.device,
-                    "type": p.fstype,
-                    "total_gb": total_gb,
-                    "used_gb": used_gb,
-                    "usage_percent": percent
-                }
-                
-                if base_disk not in disks:
-                    disks[base_disk] = {
-                        "disk_name": base_disk,
+                dev_path = f"/dev/{dev_name}"
+
+                if dev_type == "disk":
+                    full_model = f"{vendor} {model}".strip()
+                    if not full_model:
+                        try:
+                            with open(f"/sys/block/{dev_name}/device/model", 'r') as f:
+                                full_model = f.read().strip()
+                        except: pass
+                    
+                    if not full_model:
+                        full_model = f"Disco Físico ({dev_name})"
+
+                    disk_title = f"{full_model} ({size_gb} GB)" if size_gb > 0 else full_model
+
+                    disks_dict[dev_path] = {
+                        "disk_name": disk_title,
+                        "device": dev_path,
                         "health_percent": 100,
                         "smart_status": "OK (S.M.A.R.T)",
                         "partitions": []
                     }
-                    
-                disks[base_disk]["partitions"].append(part_info)
-                if percent > 95:
-                    disks[base_disk]["health_percent"] = 30
-                    disks[base_disk]["smart_status"] = "Crítico (Espacio)"
-                elif percent > 85 and disks[base_disk]["health_percent"] > 60:
-                    disks[base_disk]["health_percent"] = 60
-                    disks[base_disk]["smart_status"] = "Advertencia (Espacio)"
-            except PermissionError:
-                continue
-                
-        return list(disks.values())
-    except Exception as e:
-        print(f"Error reading storage: {e}")
-        
-    return []
+
+        except Exception as e:
+            print(f"Error in lsblk execution: {e}")
+
+    # Step 2: Extract mounted partitions with psutil & map to physical disk
+    partitions = psutil.disk_partitions(all=False)
+    for p in partitions:
+        if 'loop' in p.device or 'snap' in p.mountpoint:
+            continue
+        if system == "Darwin" and any(x in p.mountpoint for x in ['Preboot', 'Update', 'VM']):
+            continue
+
+        try:
+            usage = psutil.disk_usage(p.mountpoint)
+            total_gb = round(usage.total / (1024 ** 3), 2)
+            used_gb = round(usage.used / (1024 ** 3), 2)
+            percent = usage.percent
+
+            part_info = {
+                "mountpoint": p.mountpoint,
+                "device": p.device,
+                "type": p.fstype,
+                "total_gb": total_gb,
+                "used_gb": used_gb,
+                "usage_percent": percent
+            }
+
+            # Find which physical disk container this partition belongs to
+            target_disk_key = None
+
+            # Check direct match or parent disk regex (/dev/sda1 -> /dev/sda, /dev/nvme0n1p1 -> /dev/nvme0n1)
+            parent_dev = re.sub(r'p?\d+$', '', p.device)
+            
+            if p.device in disks_dict:
+                target_disk_key = p.device
+            elif parent_dev in disks_dict:
+                target_disk_key = parent_dev
+            elif p.device.startswith('/dev/mapper/') or 'mapper' in p.device:
+                target_disk_key = next(iter(disks_dict.keys()), None) if disks_dict else None
+
+            # Fallback if no pre-registered physical disk matched
+            if not target_disk_key:
+                disk_label = parent_dev if system == "Linux" else p.device
+                if system == "Linux":
+                    short_dev = os.path.basename(parent_dev)
+                    model_path = f"/sys/block/{short_dev}/device/model"
+                    vendor_path = f"/sys/block/{short_dev}/device/vendor"
+                    model_str = ""
+                    if os.path.exists(model_path):
+                        try:
+                            with open(model_path, 'r') as f: model_str = f.read().strip()
+                        except: pass
+                    if os.path.exists(vendor_path):
+                        try:
+                            with open(vendor_path, 'r') as f: model_str = f"{f.read().strip()} {model_str}".strip()
+                        except: pass
+                    if model_str:
+                        disk_label = f"{model_str} ({parent_dev})"
+                    else:
+                        disk_label = f"Dispositivo de Almacenamiento ({parent_dev})"
+                elif system == "Darwin":
+                    disk_label = "Disco Almacenamiento Principal (SSD)"
+
+                target_disk_key = parent_dev if parent_dev else p.device
+                if target_disk_key not in disks_dict:
+                    disks_dict[target_disk_key] = {
+                        "disk_name": disk_label,
+                        "device": target_disk_key,
+                        "health_percent": 100,
+                        "smart_status": "OK (S.M.A.R.T)",
+                        "partitions": []
+                    }
+
+            # Add partition to target disk
+            disks_dict[target_disk_key]["partitions"].append(part_info)
+
+            # Update health status based on partition space
+            if percent > 95:
+                disks_dict[target_disk_key]["health_percent"] = 30
+                disks_dict[target_disk_key]["smart_status"] = "Crítico (Espacio)"
+            elif percent > 85 and disks_dict[target_disk_key]["health_percent"] > 60:
+                disks_dict[target_disk_key]["health_percent"] = 60
+                disks_dict[target_disk_key]["smart_status"] = "Advertencia (Espacio)"
+
+        except PermissionError:
+            continue
+        except Exception as e:
+            print(f"Error reading partition {p.device}: {e}")
+
+    # Remove any disk entry with 0 partitions
+    final_disks = [d for d in disks_dict.values() if len(d["partitions"]) > 0]
+    return final_disks
 
 def get_gpu_info():
     gpus = []
     system = platform.system()
 
-    # Try GPUtil first (mostly NVIDIA)
+    # 1. Try GPUtil (NVIDIA)
     try:
         import GPUtil
         gpu_list = GPUtil.getGPUs()
@@ -240,63 +409,94 @@ def get_gpu_info():
                 "memoryTotal": gpu.memoryTotal,
                 "memoryUsed": gpu.memoryUsed
             })
-    except:
-        pass
+    except: pass
 
-    if not gpus:
-        if system == "Darwin":
+    # 2. Linux Brute Force (lspci / lshw)
+    if not gpus and system == "Linux":
+        try:
+            out = subprocess.check_output("lspci -nn 2>/dev/null | grep -iE 'vga|3d|display'", shell=True).decode()
+            for line in out.splitlines():
+                if ':' in line:
+                    parts = line.split(':', 2)
+                    card_name = parts[-1].strip() if len(parts) >= 3 else line
+                    card_name = re.sub(r'\[[0-9a-fA-F]{4}:[0-9a-fA-F]{4}\]', '', card_name).strip()
+                    card_name = re.sub(r'\(rev \d+\)', '', card_name).strip()
+                    if card_name:
+                        gpus.append({
+                            "name": card_name,
+                            "load": 0,
+                            "memoryTotal": 0,
+                            "memoryUsed": 0
+                        })
+        except: pass
+
+        if not gpus:
             try:
-                out = subprocess.check_output(['system_profiler', 'SPDisplaysDataType']).decode('utf-8')
-                chip_name = ''
-                vram_mb = 0
+                out = subprocess.check_output("lshw -C display 2>/dev/null | grep 'product:'", shell=True).decode()
                 for line in out.splitlines():
-                    line_str = line.strip()
-                    if line_str.startswith('Chipset Model:'):
-                        chip_name = line_str.split(':', 1)[1].strip()
-                    elif 'VRAM' in line_str:
-                        match = re.search(r'(\d+)\s*(MB|GB)', line_str, re.IGNORECASE)
-                        if match:
-                            val = int(match.group(1))
-                            unit = match.group(2).upper()
-                            vram_mb = val if unit == 'MB' else val * 1024
-                    if chip_name and vram_mb > 0:
+                    p_name = line.split(':', 1)[1].strip()
+                    if p_name:
                         gpus.append({
-                            "name": chip_name,
+                            "name": p_name,
                             "load": 0,
-                            "memoryTotal": vram_mb,
+                            "memoryTotal": 0,
                             "memoryUsed": 0
                         })
-                        chip_name = ''
-                        vram_mb = 0
-                if not gpus and chip_name:
-                    gpus.append({"name": chip_name, "load": 0, "memoryTotal": 1536, "memoryUsed": 0})
-            except:
-                pass
-        elif system == "Windows":
-            try:
-                out = subprocess.check_output('wmic path win32_VideoController get name,AdapterRAM', shell=True).decode()
-                lines = [l.strip() for l in out.splitlines() if l.strip()]
-                for line in lines[1:]:
-                    parts = line.rsplit(None, 1)
-                    if len(parts) == 2:
-                        name = parts[0]
-                        try:
-                            ram_bytes = int(parts[1])
-                            ram_mb = round(ram_bytes / (1024 * 1024))
-                        except:
-                            ram_mb = 0
-                        gpus.append({
-                            "name": name,
-                            "load": 0,
-                            "memoryTotal": ram_mb,
-                            "memoryUsed": 0
-                        })
-            except:
-                pass
+            except: pass
+
+    # 3. macOS Brute Force (system_profiler)
+    if not gpus and system == "Darwin":
+        try:
+            out = subprocess.check_output(['system_profiler', 'SPDisplaysDataType']).decode('utf-8')
+            chip_name = ''
+            vram_mb = 0
+            for line in out.splitlines():
+                line_str = line.strip()
+                if line_str.startswith('Chipset Model:'):
+                    chip_name = line_str.split(':', 1)[1].strip()
+                elif 'VRAM' in line_str:
+                    match = re.search(r'(\d+)\s*(MB|GB)', line_str, re.IGNORECASE)
+                    if match:
+                        val = int(match.group(1))
+                        unit = match.group(2).upper()
+                        vram_mb = val if unit == 'MB' else val * 1024
+                if chip_name and vram_mb > 0:
+                    gpus.append({
+                        "name": chip_name,
+                        "load": 0,
+                        "memoryTotal": vram_mb,
+                        "memoryUsed": 0
+                    })
+                    chip_name = ''
+                    vram_mb = 0
+            if not gpus and chip_name:
+                gpus.append({"name": chip_name, "load": 0, "memoryTotal": 1536, "memoryUsed": 0})
+        except: pass
+
+    # 4. Windows Brute Force (WMIC)
+    if not gpus and system == "Windows":
+        try:
+            out = subprocess.check_output('wmic path win32_VideoController get name,AdapterRAM', shell=True).decode()
+            lines = [l.strip() for l in out.splitlines() if l.strip()]
+            for line in lines[1:]:
+                parts = line.rsplit(None, 1)
+                if len(parts) == 2:
+                    name = parts[0]
+                    try:
+                        ram_bytes = int(parts[1])
+                        ram_mb = round(ram_bytes / (1024 * 1024))
+                    except: ram_mb = 0
+                    gpus.append({
+                        "name": name,
+                        "load": 0,
+                        "memoryTotal": ram_mb,
+                        "memoryUsed": 0
+                    })
+        except: pass
 
     if not gpus:
         gpus.append({
-            "name": "GPU Genérica / Integrada",
+            "name": "GPU Genérica / Gráficos Integrados del Sistema",
             "load": 0,
             "memoryTotal": 0,
             "memoryUsed": 0
@@ -307,9 +507,10 @@ def get_gpu_info():
 def send_data(ws):
     while True:
         try:
+            sys_info = get_system_info()
             data = {
-                "system_info": get_system_info(),
-                "os": get_system_info(),
+                "system_info": sys_info,
+                "os": sys_info,
                 "cpu": get_cpu_info(),
                 "ram": get_ram_info(),
                 "storage": get_storage_info(),
@@ -354,10 +555,10 @@ if __name__ == "__main__":
         try:
             print(f"Conectando a {ws_url}...")
             ws = websocket.WebSocketApp(ws_url,
-                                      on_open=on_open,
-                                      on_message=on_message,
-                                      on_error=on_error,
-                                      on_close=on_close)
+                                       on_open=on_open,
+                                       on_message=on_message,
+                                       on_error=on_error,
+                                       on_close=on_close)
 
             ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
         except Exception as e:

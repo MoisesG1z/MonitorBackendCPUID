@@ -21,6 +21,7 @@ import java.io.File
 
 // Store active websocket sessions (Client ID -> Session)
 val activeConnections = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
+
 // Store latest data from agents (Client ID -> JSON Data)
 val agentData = ConcurrentHashMap<String, String>()
 
@@ -46,7 +47,7 @@ fun Application.module() {
         maxFrameSize = Long.MAX_VALUE
         masking = false
     }
-    
+
     install(ContentNegotiation) {
         gson {
             setPrettyPrinting()
@@ -58,7 +59,7 @@ fun Application.module() {
         get("/") {
             call.respondText("Server is up and running!")
         }
-        
+
         // Serve the Python agent download
         get("/download-agent") {
             val file = File("agent/agent.py")
@@ -69,7 +70,7 @@ fun Application.module() {
                 call.respond(HttpStatusCode.NotFound, "Agent file not found on server.")
             }
         }
-        
+
         get("/api/data/latest") {
             val latest = agentData.values.lastOrNull()
             if (latest != null) {
@@ -80,7 +81,8 @@ fun Application.module() {
         }
 
         get("/api/data/{clientId}") {
-            val clientId = call.parameters["clientId"] ?: return@get call.respond(HttpStatusCode.BadRequest, "Missing client id")
+            val clientId =
+                call.parameters["clientId"] ?: return@get call.respond(HttpStatusCode.BadRequest, "Missing client id")
             var data = agentData[clientId]
             if (data == null && agentData.isNotEmpty()) {
                 data = agentData.values.lastOrNull()
@@ -97,7 +99,7 @@ fun Application.module() {
             val clientId = call.parameters["clientId"] ?: return@webSocket
             activeConnections[clientId] = this
             println("Agent connected: $clientId")
-            
+
             try {
                 for (frame in incoming) {
                     if (frame is Frame.Text) {

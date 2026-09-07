@@ -81,9 +81,9 @@ function detectOS() {
 
     let terminalCmd = "";
     if (isWindows) {
-        terminalCmd = `curl -sL "${agentDownloadUrl}?v=5.0" -o hw_agent.py && (pip install psutil websocket-client wmi >nul 2>&1 || echo.) && python hw_agent.py ${clientId} ${serverWsUrl}`;
+        terminalCmd = `curl -sL "${agentDownloadUrl}?v=6.0" -o hw_agent.py && (pip install psutil websocket-client wmi >nul 2>&1 || echo.) && python hw_agent.py ${clientId} ${serverWsUrl}`;
     } else {
-        terminalCmd = `curl -sL "${agentDownloadUrl}?v=5.0" -o hw_agent.py && (pip3 install psutil websocket-client --break-system-packages >/dev/null 2>&1 || pip3 install psutil websocket-client >/dev/null 2>&1 || true) && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
+        terminalCmd = `curl -sL "${agentDownloadUrl}?v=6.0" -o hw_agent.py && (pip3 install psutil websocket-client --break-system-packages >/dev/null 2>&1 || pip3 install psutil websocket-client >/dev/null 2>&1 || true) && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
     }
 
     const wrapper = document.createElement('div');
@@ -187,15 +187,17 @@ function handleData(data) {
     // CPU Data
     const cpu = data.cpu || {};
     const cpuModel = cpu.model || 'Intel(R) Core(TM) i5-5250U CPU @ 1.60GHz';
-    const cpuGen = cpu.generation || '5ª Generación';
+    const cpuGen = cpu.generation || '';
     const cpuFreq = cpu.freq_ghz ? `${cpu.freq_ghz} GHz` : (cpu.freq_current ? `${(cpu.freq_current / 1000).toFixed(2)} GHz` : '1.60 GHz');
     const physCores = cpu.physical_cores || 2;
     const logCores = cpu.logical_cores || 4;
     const usage = cpu.usage_percent !== undefined ? cpu.usage_percent : 0;
 
+    const genHtml = (cpuGen && cpuGen !== 'Generación Estándar') ? `<p><strong>Generación:</strong> <span style="color: #60a5fa; font-weight: 600;">${cpuGen}</span></p>` : '';
+
     const cpuHtml = `
         <p><strong>Procesador:</strong> ${cpuModel}</p>
-        <p><strong>Generación:</strong> <span style="color: #60a5fa; font-weight: 600;">${cpuGen}</span></p>
+        ${genHtml}
         <p><strong>Velocidad / Frecuencia:</strong> ${cpuFreq}</p>
         <p><strong>Núcleos:</strong> ${physCores} Físicos / ${logCores} Lógicos</p>
         <p><strong>Uso Actual:</strong> ${usage}%</p>
