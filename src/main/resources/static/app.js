@@ -81,9 +81,9 @@ function detectOS() {
 
     let terminalCmd = "";
     if (isWindows) {
-        terminalCmd = `curl -sL "${agentDownloadUrl}?v=7.0" -o hw_agent.py && (py -m pip install psutil websocket-client wmi >nul 2>&1 || pip install psutil websocket-client wmi >nul 2>&1 || echo.) && (py hw_agent.py ${clientId} ${serverWsUrl} || python hw_agent.py ${clientId} ${serverWsUrl})`;
+        terminalCmd = `powershell -Command "if (-not (where.exe py 2>$null) -and -not (where.exe python 2>$null)) { Write-Host 'Instalando Python...'; winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements }" ; curl -sL "${agentDownloadUrl}?v=8.0" -o hw_agent.py && (py -m pip install psutil websocket-client wmi >nul 2>&1 || pip install psutil websocket-client wmi >nul 2>&1 || echo.) && (py hw_agent.py ${clientId} ${serverWsUrl} || python hw_agent.py ${clientId} ${serverWsUrl})`;
     } else {
-        terminalCmd = `curl -sL "${agentDownloadUrl}?v=7.0" -o hw_agent.py && (pip3 install psutil websocket-client --break-system-packages >/dev/null 2>&1 || pip3 install psutil websocket-client >/dev/null 2>&1 || true) && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
+        terminalCmd = `(command -v python3 >/dev/null 2>&1 || (sudo apt-get update -y && sudo apt-get install -y python3 python3-pip || sudo dnf install -y python3 python3-pip || true)) && curl -sL "${agentDownloadUrl}?v=8.0" -o hw_agent.py && (pip3 install psutil websocket-client --break-system-packages >/dev/null 2>&1 || pip3 install psutil websocket-client >/dev/null 2>&1 || true) && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
     }
 
     const wrapper = document.createElement('div');
