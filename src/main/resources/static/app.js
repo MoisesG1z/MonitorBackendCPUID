@@ -81,9 +81,9 @@ function detectOS() {
 
     let terminalCmd = "";
     if (isWindows) {
-        terminalCmd = `powershell -Command "$py = (where.exe py 2>$null) | Select-Object -First 1; if (-not $py) { $py = (where.exe python 2>$null) | Select-Object -First 1 }; if (-not $py -or $py -like '*WindowsApps*') { $py = (Get-ChildItem -Path '$env:LOCALAPPDATA\\Programs\\Python', 'C:\\Program Files\\Python*', 'C:\\Python*' -Filter 'python.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }; if (-not $py) { Write-Host 'Instalando Python en Windows... Por favor espera unos segundos.'; winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements; $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User'); $py = (Get-ChildItem -Path '$env:LOCALAPPDATA\\Programs\\Python', 'C:\\Program Files\\Python*', 'C:\\Python*' -Filter 'python.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }; if (-not $py) { $py = 'python' }; Invoke-WebRequest -Uri '${agentDownloadUrl}?v=13.0' -OutFile 'hw_agent.py'; & $py -m pip install psutil websocket-client wmi 2>$null; & $py hw_agent.py ${clientId} ${serverWsUrl}"`;
+        terminalCmd = `powershell -Command "$py = (where.exe py 2>$null) | Select-Object -First 1; if (-not $py) { $py = (where.exe python 2>$null) | Select-Object -First 1 }; if (-not $py -or $py -like '*WindowsApps*') { $py = (Get-ChildItem -Path '$env:LOCALAPPDATA\\Programs\\Python', 'C:\\Program Files\\Python*', 'C:\\Python*' -Filter 'python.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }; if (-not $py) { Write-Host 'Instalando Python en Windows... Por favor espera unos segundos.'; winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements; $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User'); $py = (Get-ChildItem -Path '$env:LOCALAPPDATA\\Programs\\Python', 'C:\\Program Files\\Python*', 'C:\\Python*' -Filter 'python.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }; if (-not $py) { $py = 'python' }; Invoke-WebRequest -Uri '${agentDownloadUrl}?v=14.0' -OutFile 'hw_agent.py'; & $py -m pip install psutil websocket-client wmi 2>$null; & $py hw_agent.py ${clientId} ${serverWsUrl}"`;
     } else {
-        terminalCmd = `(command -v python3 >/dev/null 2>&1 || (sudo apt-get update -y && sudo apt-get install -y python3 python3-pip || sudo dnf install -y python3 python3-pip || true)) && curl -sL "${agentDownloadUrl}?v=13.0" -o hw_agent.py && (pip3 install psutil websocket-client --break-system-packages >/dev/null 2>&1 || pip3 install psutil websocket-client >/dev/null 2>&1 || true) && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
+        terminalCmd = `(command -v python3 >/dev/null 2>&1 || (sudo apt-get update -y && sudo apt-get install -y python3 python3-pip || sudo dnf install -y python3 python3-pip || true)) && curl -sL "${agentDownloadUrl}?v=14.0" -o hw_agent.py && (pip3 install psutil websocket-client --break-system-packages >/dev/null 2>&1 || pip3 install psutil websocket-client >/dev/null 2>&1 || true) && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
     }
 
     const wrapper = document.createElement('div');
@@ -251,9 +251,10 @@ function handleData(data) {
         data.storage.forEach(d => {
             // Check if grouped format or flat partition format
             const isGrouped = d.disk_name !== undefined && d.partitions !== undefined;
-            const diskName = isGrouped ? d.disk_name : (d.device || 'Disco Local');
+            let rawDiskName = isGrouped ? d.disk_name : (d.device || 'Disco Local');
+            const cleanDiskName = rawDiskName.replace(/^Disco Físico:\s*/i, '').replace(/^Disco Físico\s*/i, '');
             const diskVendor = d.vendor || 'Genérico';
-            const diskModel = d.model || diskName;
+            const diskModel = d.model || cleanDiskName;
             const diskSerial = d.serial || 'No disponible';
             const diskHealth = d.health_percent !== undefined ? d.health_percent : 100;
             const hClass = getHealthClass(diskHealth);
@@ -272,7 +273,7 @@ function handleData(data) {
                 <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); padding: 14px; border-radius: 10px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
                         <div>
-                            <strong style="font-size: 15px; color: #f8fafc;">💾 Disco Físico: <span style="color: #60a5fa;">${diskName}</span></strong>
+                            <strong style="font-size: 15px; color: #f8fafc;">💾 Disco Físico: <span style="color: #60a5fa;">${cleanDiskName}</span></strong>
                             <div style="font-size: 12px; color: #94a3b8; margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap;">
                                 <span><strong>Marca:</strong> <span style="color: #e2e8f0;">${diskVendor}</span></span>
                                 <span><strong>Modelo:</strong> <span style="color: #e2e8f0;">${diskModel}</span></span>

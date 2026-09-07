@@ -282,8 +282,103 @@ def get_storage_info():
     disks_dict = {}
     drive_to_disk = {}
 
-    # Step 1: Detect physical disks on Linux via lsblk & sysfs & udevadm
-    if system == "Linux":
+    # Step 1: Detect physical disks on Windows via PowerShell Get-Partition + Get-Disk
+    if system == "Windows":
+        try:
+            cmd = 'powershell -Command "Get-Partition | Where-Object { $_.DriveLetter } | ForEach-Object { $d = $_ | Get-Disk; [PSCustomObject]@{ DriveLetter = [string]$_.DriveLetter; DiskNumber = $d.Number; Model = $d.Model; FriendlyName = $d.FriendlyName; SerialNumber = $d.SerialNumber; Size = $d.Size } } | ConvertTo-Json"'
+            out = subprocess.check_output(cmd, shell=True).decode()
+            if out.strip():
+                data = json.loads(out)
+                if isinstance(data, dict):
+                    data = [data]
+                
+                for item in data:
+                    letter = str(item.get('DriveLetter', '')).upper()
+                    disk_num = item.get('DiskNumber', 0)
+                    model = str(item.get('Model') or item.get('FriendlyName') or 'Disco Local').strip()
+                    serial = str(item.get('SerialNumber') or 'No disponible').strip()
+                    size_bytes = item.get('Size', 0)
+                    try: size_gb = round(int(size_bytes) / (1024**3), 2)
+                    except: size_gb = 0
+
+                    disk_key = f"DISK_{disk_num}"
+                    drive_to_disk[f"{letter}:"] = disk_key
+
+                    if disk_key not in disks_dict:
+                        vendor = model.split()[0] if model else "Genérico"
+                        if vendor.lower() in ["vbox", "virtualbox"]: vendor = "VirtualBox"
+                        elif vendor.lower() in ["vmware"]: vendor = "VMware"
+
+                        title = f"{model} ({size_gb} GB)" if size_gb > 0 else model
+                        disks_dict[disk_key] = {
+                            "disk_name": title,
+                            "vendor": vendor,
+                            "model": model,
+                            "serial": serial if serial and serial != '0' else "No disponible",
+                            "device": f"\\\\.\\PHYSICALDRIVE{disk_num}",
+                            "health_percent": 100,
+                            "smart_status": "OK (S.M.A.R.T)",
+                            "partitions": []
+                        }
+        except Exception as e:
+            print(f"PowerShell disk query error: {e}")
+
+        # Secondary Method: WMIC diskdrive fallback if PowerShell Get-Disk was empty
+        if not disks_dict:
+            try:
+                out_disk = subprocess.check_output('wmic diskdrive get DeviceID,Model,Manufacturer,Caption,SerialNumber,Size /format:csv', shell=True).decode()
+                for line in out_disk.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith('Node'): continue
+                    parts = line.split(',')
+                    if len(parts) >= 7:
+                        caption = parts[1].strip()
+                        dev_id = parts[2].strip().upper()
+                        vendor = parts[3].strip()
+                        model = parts[4].strip() or caption
+                        serial = parts[5].strip()
+                        try:
+                            size_bytes = int(parts[6].strip())
+                            size_gb = round(size_bytes / (1024**3), 2)
+                        except: size_gb = 0
+
+                        if not vendor or vendor.startswith('(') or vendor == 'System manufacturer':
+                            vendor = model.split()[0] if model else "Genérico"
+                        serial = serial or "No disponible"
+
+                        if dev_id and model:
+                            full_name = f"{vendor} {model}".strip() if vendor not in model else model
+                            disk_title = f"{full_name} ({size_gb} GB)" if size_gb > 0 else full_name
+                            disks_dict[dev_id] = {
+                                "disk_name": disk_title,
+                                "vendor": vendor,
+                                "model": model,
+                                "serial": serial,
+                                "device": dev_id,
+                                "health_percent": 100,
+                                "smart_status": "OK (S.M.A.R.T)",
+                                "partitions": []
+                            }
+
+                out_map = subprocess.check_output('wmic path Win32_LogicalDiskToPartition get Antecedent,Dependent /format:csv', shell=True).decode()
+                for line in out_map.splitlines():
+                    if not line or line.startswith('Node'): continue
+                    parts = line.split(',')
+                    if len(parts) >= 3:
+                        antecedent = parts[1]
+                        dependent = parts[2]
+                        disk_match = re.search(r'Disk #(\d+)', antecedent)
+                        drive_match = re.search(r'([A-Z]:)', dependent, re.IGNORECASE)
+                        if disk_match and drive_match:
+                            disk_num = disk_match.group(1)
+                            drive_letter = drive_match.group(1).upper()
+                            phys_dev = f"\\\\.\\PHYSICALDRIVE{disk_num}"
+                            drive_to_disk[drive_letter] = phys_dev
+            except Exception as e:
+                print(f"WMIC disk query error: {e}")
+
+    # Step 1b: Detect physical disks on Linux via lsblk & sysfs & udevadm
+    elif system == "Linux":
         try:
             out = subprocess.check_output("lsblk -b -P -o NAME,MODEL,VENDOR,SIZE,TYPE,SERIAL 2>/dev/null", shell=True).decode()
             for line in out.splitlines():
@@ -339,61 +434,6 @@ def get_storage_info():
                     }
         except Exception as e:
             print(f"Error in lsblk execution: {e}")
-
-    # Step 1b: Detect physical disks on Windows via WMIC + LogicalDiskToPartition
-    elif system == "Windows":
-        try:
-            out_disk = subprocess.check_output('wmic diskdrive get DeviceID,Model,Manufacturer,Caption,SerialNumber,Size /format:csv', shell=True).decode()
-            for line in out_disk.splitlines():
-                line = line.strip()
-                if not line or line.startswith('Node'): continue
-                parts = line.split(',')
-                # Format: Node, Caption, DeviceID, Manufacturer, Model, SerialNumber, Size
-                if len(parts) >= 7:
-                    caption = parts[1].strip()
-                    dev_id = parts[2].strip()
-                    vendor = parts[3].strip()
-                    model = parts[4].strip() or caption
-                    serial = parts[5].strip()
-                    try:
-                        size_bytes = int(parts[6].strip())
-                        size_gb = round(size_bytes / (1024**3), 2)
-                    except: size_gb = 0
-
-                    if not vendor or vendor.startswith('(') or vendor == 'System manufacturer':
-                        vendor = model.split()[0] if model else "Genérico"
-                    serial = serial or "No disponible"
-
-                    if dev_id and model:
-                        full_name = f"{vendor} {model}".strip() if vendor not in model else model
-                        disk_title = f"{full_name} ({size_gb} GB)" if size_gb > 0 else full_name
-                        disks_dict[dev_id] = {
-                            "disk_name": disk_title,
-                            "vendor": vendor,
-                            "model": model,
-                            "serial": serial,
-                            "device": dev_id,
-                            "health_percent": 100,
-                            "smart_status": "OK (S.M.A.R.T)",
-                            "partitions": []
-                        }
-
-            out_map = subprocess.check_output('wmic path Win32_LogicalDiskToPartition get Antecedent,Dependent /format:csv', shell=True).decode()
-            for line in out_map.splitlines():
-                if not line or line.startswith('Node'): continue
-                parts = line.split(',')
-                if len(parts) >= 3:
-                    antecedent = parts[1]
-                    dependent = parts[2]
-                    disk_match = re.search(r'Disk #(\d+)', antecedent)
-                    drive_match = re.search(r'([A-Z]:)', dependent, re.IGNORECASE)
-                    if disk_match and drive_match:
-                        disk_num = disk_match.group(1)
-                        drive_letter = drive_match.group(1).upper()
-                        phys_dev = f"\\\\.\\PHYSICALDRIVE{disk_num}"
-                        drive_to_disk[drive_letter] = phys_dev
-        except Exception as e:
-            print(f"Windows physical disk detection error: {e}")
 
     # Step 1c: Detect physical disks on macOS via system_profiler & diskutil
     elif system == "Darwin":
@@ -471,8 +511,8 @@ def get_storage_info():
                 serial_str = "No disponible"
 
                 if system == "Windows":
-                    disk_label = f"Disco Físico ({p.mountpoint})"
-                    model_str = f"Disco ({p.mountpoint})"
+                    disk_label = f"Disco ({p.mountpoint})"
+                    model_str = f"Disco {p.mountpoint}"
                 elif system == "Linux":
                     short_dev = os.path.basename(re.sub(r'p?\d+$', '', p.device))
                     model_path = f"/sys/block/{short_dev}/device/model"
