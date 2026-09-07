@@ -58,7 +58,6 @@ def get_system_info():
         except:
             model = "Windows PC"
 
-        # Windows Serial Number Brute Force (BIOS -> BaseBoard -> CSProduct -> OS Serial)
         try:
             out_s = subprocess.check_output('wmic bios get serialnumber', shell=True).decode()
             lines = [l.strip() for l in out_s.splitlines() if l.strip()]
@@ -94,7 +93,6 @@ def get_system_info():
         arch = platform.architecture()[0]
 
     elif system == "Linux":
-        # 1. Brand Brute Force
         for path in ['/sys/class/dmi/id/sys_vendor', '/sys/class/dmi/id/board_vendor']:
             if os.path.exists(path):
                 try:
@@ -110,7 +108,6 @@ def get_system_info():
                 if out: brand = out.split(':', 1)[1].strip()
             except: pass
 
-        # 2. Model Brute Force
         for path in ['/sys/class/dmi/id/product_name', '/sys/class/dmi/id/board_name', '/sys/class/dmi/id/product_family']:
             if os.path.exists(path):
                 try:
@@ -126,7 +123,6 @@ def get_system_info():
                 if out: model = out.split(':', 1)[1].strip()
             except: pass
 
-        # 3. Serial Number Brute Force
         for path in [
             '/sys/class/dmi/id/product_serial',
             '/sys/class/dmi/id/chassis_serial',
@@ -286,36 +282,56 @@ def get_storage_info():
     disks_dict = {}
     drive_to_disk = {}
 
-    # Step 1: Detect physical disks on Linux via lsblk
+    # Step 1: Detect physical disks on Linux via lsblk & sysfs & udevadm
     if system == "Linux":
         try:
-            out = subprocess.check_output("lsblk -b -P -o NAME,MODEL,VENDOR,SIZE,TYPE,MOUNTPOINT,FSTYPE 2>/dev/null", shell=True).decode()
+            out = subprocess.check_output("lsblk -b -P -o NAME,MODEL,VENDOR,SIZE,TYPE,SERIAL 2>/dev/null", shell=True).decode()
             for line in out.splitlines():
                 items = dict(re.findall(r'([A-Z_]+)="([^"]*)"', line))
                 dev_name = items.get('NAME', '')
                 dev_type = items.get('TYPE', '')
                 vendor = items.get('VENDOR', '').strip()
                 model = items.get('MODEL', '').strip()
+                serial = items.get('SERIAL', '').strip()
                 size_bytes = int(items.get('SIZE', 0)) if items.get('SIZE', '').isdigit() else 0
                 size_gb = round(size_bytes / (1024**3), 2) if size_bytes > 0 else 0
-                
+
                 dev_path = f"/dev/{dev_name}"
 
                 if dev_type == "disk":
-                    full_model = f"{vendor} {model}".strip()
-                    if not full_model:
+                    short_dev = dev_name
+                    if not vendor:
                         try:
-                            with open(f"/sys/block/{dev_name}/device/model", 'r') as f:
-                                full_model = f.read().strip()
+                            with open(f"/sys/block/{short_dev}/device/vendor", 'r') as f: vendor = f.read().strip()
                         except: pass
-                    
-                    if not full_model:
-                        full_model = f"Disco Físico ({dev_name})"
+                    if not model:
+                        try:
+                            with open(f"/sys/block/{short_dev}/device/model", 'r') as f: model = f.read().strip()
+                        except: pass
+                    if not serial:
+                        try:
+                            with open(f"/sys/block/{short_dev}/device/serial", 'r') as f: serial = f.read().strip()
+                        except: pass
+                    if not serial or not model:
+                        try:
+                            out_u = subprocess.check_output(f"udevadm info --query=property --name={dev_path} 2>/dev/null", shell=True).decode()
+                            for uline in out_u.splitlines():
+                                if uline.startswith('ID_SERIAL_SHORT='): serial = uline.split('=')[1].strip()
+                                elif uline.startswith('ID_MODEL=') and not model: model = uline.split('=')[1].strip()
+                                elif uline.startswith('ID_VENDOR=') and not vendor: vendor = uline.split('=')[1].strip()
+                        except: pass
 
-                    disk_title = f"{full_model} ({size_gb} GB)" if size_gb > 0 else full_model
+                    vendor = vendor or "Genérico"
+                    model = model or f"Disco Físico {dev_name}"
+                    serial = serial or "No disponible"
+                    full_name = f"{vendor} {model}".strip() if vendor != "Genérico" else model
+                    disk_title = f"{full_name} ({size_gb} GB)" if size_gb > 0 else full_name
 
                     disks_dict[dev_path] = {
                         "disk_name": disk_title,
+                        "vendor": vendor,
+                        "model": model,
+                        "serial": serial,
                         "device": dev_path,
                         "health_percent": 100,
                         "smart_status": "OK (S.M.A.R.T)",
@@ -327,33 +343,41 @@ def get_storage_info():
     # Step 1b: Detect physical disks on Windows via WMIC + LogicalDiskToPartition
     elif system == "Windows":
         try:
-            # Query Win32_DiskDrive
-            out_disk = subprocess.check_output('wmic diskdrive get DeviceID,Model,Size,Caption /format:csv', shell=True).decode()
+            out_disk = subprocess.check_output('wmic diskdrive get DeviceID,Model,Manufacturer,Caption,SerialNumber,Size /format:csv', shell=True).decode()
             for line in out_disk.splitlines():
                 line = line.strip()
                 if not line or line.startswith('Node'): continue
                 parts = line.split(',')
-                # Format: Node, Caption, DeviceID, Model, Size
-                if len(parts) >= 5:
+                # Format: Node, Caption, DeviceID, Manufacturer, Model, SerialNumber, Size
+                if len(parts) >= 7:
                     caption = parts[1].strip()
                     dev_id = parts[2].strip()
-                    model = parts[3].strip() or caption
+                    vendor = parts[3].strip()
+                    model = parts[4].strip() or caption
+                    serial = parts[5].strip()
                     try:
-                        size_bytes = int(parts[4].strip())
+                        size_bytes = int(parts[6].strip())
                         size_gb = round(size_bytes / (1024**3), 2)
                     except: size_gb = 0
 
+                    if not vendor or vendor.startswith('(') or vendor == 'System manufacturer':
+                        vendor = model.split()[0] if model else "Genérico"
+                    serial = serial or "No disponible"
+
                     if dev_id and model:
-                        full_name = f"{model} ({size_gb} GB)" if size_gb > 0 else model
+                        full_name = f"{vendor} {model}".strip() if vendor not in model else model
+                        disk_title = f"{full_name} ({size_gb} GB)" if size_gb > 0 else full_name
                         disks_dict[dev_id] = {
-                            "disk_name": full_name,
+                            "disk_name": disk_title,
+                            "vendor": vendor,
+                            "model": model,
+                            "serial": serial,
                             "device": dev_id,
                             "health_percent": 100,
                             "smart_status": "OK (S.M.A.R.T)",
                             "partitions": []
                         }
 
-            # Query LogicalDiskToPartition to map drive letters (C:, G:) to PHYSICALDRIVE
             out_map = subprocess.check_output('wmic path Win32_LogicalDiskToPartition get Antecedent,Dependent /format:csv', shell=True).decode()
             for line in out_map.splitlines():
                 if not line or line.startswith('Node'): continue
@@ -370,6 +394,34 @@ def get_storage_info():
                         drive_to_disk[drive_letter] = phys_dev
         except Exception as e:
             print(f"Windows physical disk detection error: {e}")
+
+    # Step 1c: Detect physical disks on macOS via system_profiler & diskutil
+    elif system == "Darwin":
+        try:
+            out = subprocess.check_output(['system_profiler', 'SPStorageDataType', 'SPNVMeDataType', 'SPSATADataType']).decode('utf-8')
+            vendor = "Apple Inc."
+            model = "Apple SSD / Hard Drive"
+            serial = "No disponible"
+            for line in out.splitlines():
+                line_str = line.strip()
+                if line_str.startswith('Device Name:') or line_str.startswith('Model:'):
+                    model = line_str.split(':', 1)[1].strip()
+                elif line_str.startswith('Serial Number:') or line_str.startswith('Volume UUID:'):
+                    serial = line_str.split(':', 1)[1].strip()
+                elif line_str.startswith('Manufacturer:') or line_str.startswith('Vendor:'):
+                    vendor = line_str.split(':', 1)[1].strip()
+
+            disks_dict["mac_primary"] = {
+                "disk_name": f"{model}",
+                "vendor": vendor,
+                "model": model,
+                "serial": serial,
+                "device": "disk0",
+                "health_percent": 100,
+                "smart_status": "OK (S.M.A.R.T)",
+                "partitions": []
+            }
+        except: pass
 
     # Step 2: Extract mounted partitions with psutil & map to physical disk
     partitions = psutil.disk_partitions(all=False)
@@ -394,16 +446,15 @@ def get_storage_info():
                 "usage_percent": percent
             }
 
-            # Find which physical disk container this partition belongs to
             target_disk_key = None
 
             if system == "Windows":
-                # Drive letter matching (e.g. C: -> \\.\PHYSICALDRIVE0)
                 drive_letter = p.mountpoint[:2].upper() if len(p.mountpoint) >= 2 else ""
                 if drive_letter in drive_to_disk and drive_to_disk[drive_letter] in disks_dict:
                     target_disk_key = drive_to_disk[drive_letter]
+            elif system == "Darwin":
+                target_disk_key = "mac_primary"
             else:
-                # Linux / Darwin matching
                 parent_dev = re.sub(r'p?\d+$', '', p.device)
                 if p.device in disks_dict:
                     target_disk_key = p.device
@@ -415,32 +466,43 @@ def get_storage_info():
             # Fallback if no pre-registered physical disk matched
             if not target_disk_key:
                 disk_label = p.mountpoint
+                vendor_str = "Genérico"
+                model_str = p.mountpoint
+                serial_str = "No disponible"
+
                 if system == "Windows":
                     disk_label = f"Disco Físico ({p.mountpoint})"
+                    model_str = f"Disco ({p.mountpoint})"
                 elif system == "Linux":
                     short_dev = os.path.basename(re.sub(r'p?\d+$', '', p.device))
                     model_path = f"/sys/block/{short_dev}/device/model"
                     vendor_path = f"/sys/block/{short_dev}/device/vendor"
-                    model_str = ""
+                    serial_path = f"/sys/block/{short_dev}/device/serial"
                     if os.path.exists(model_path):
                         try:
                             with open(model_path, 'r') as f: model_str = f.read().strip()
                         except: pass
                     if os.path.exists(vendor_path):
                         try:
-                            with open(vendor_path, 'r') as f: model_str = f"{f.read().strip()} {model_str}".strip()
+                            with open(vendor_path, 'r') as f: vendor_str = f.read().strip()
                         except: pass
-                    if model_str:
-                        disk_label = f"{model_str} ({short_dev})"
-                    else:
-                        disk_label = f"Dispositivo de Almacenamiento ({p.device})"
+                    if os.path.exists(serial_path):
+                        try:
+                            with open(serial_path, 'r') as f: serial_str = f.read().strip()
+                        except: pass
+                    disk_label = f"{vendor_str} {model_str}".strip()
                 elif system == "Darwin":
                     disk_label = "Disco Almacenamiento Principal (SSD)"
+                    vendor_str = "Apple Inc."
+                    model_str = "Macintosh SSD"
 
                 target_disk_key = p.mountpoint
                 if target_disk_key not in disks_dict:
                     disks_dict[target_disk_key] = {
                         "disk_name": disk_label,
+                        "vendor": vendor_str,
+                        "model": model_str,
+                        "serial": serial_str,
                         "device": target_disk_key,
                         "health_percent": 100,
                         "smart_status": "OK (S.M.A.R.T)",
@@ -468,7 +530,6 @@ def get_gpu_info():
     gpus = []
     system = platform.system()
 
-    # 1. Try GPUtil (NVIDIA)
     try:
         import GPUtil
         gpu_list = GPUtil.getGPUs()
@@ -481,7 +542,6 @@ def get_gpu_info():
             })
     except: pass
 
-    # 2. Linux Brute Force (lspci / lshw)
     if not gpus and system == "Linux":
         try:
             out = subprocess.check_output("lspci -nn 2>/dev/null | grep -iE 'vga|3d|display'", shell=True).decode()
@@ -514,7 +574,6 @@ def get_gpu_info():
                         })
             except: pass
 
-    # 3. macOS Brute Force (system_profiler)
     if not gpus and system == "Darwin":
         try:
             out = subprocess.check_output(['system_profiler', 'SPDisplaysDataType']).decode('utf-8')
@@ -543,7 +602,6 @@ def get_gpu_info():
                 gpus.append({"name": chip_name, "load": 0, "memoryTotal": 1536, "memoryUsed": 0})
         except: pass
 
-    # 4. Windows Brute Force (WMIC / PowerShell)
     if not gpus and system == "Windows":
         try:
             out = subprocess.check_output('wmic path win32_VideoController get name,AdapterRAM /format:csv', shell=True).decode()
@@ -551,10 +609,8 @@ def get_gpu_info():
                 line = line.strip()
                 if not line or line.startswith('Node'): continue
                 parts = line.split(',')
-                # Format: Node, AdapterRAM, Name
                 if len(parts) >= 3:
                     name = parts[2].strip()
-                    # Clean up leading numbers like "0 VirtualBox..."
                     name = re.sub(r'^\d+\s+', '', name).strip()
                     try:
                         ram_bytes = int(parts[1].strip())
