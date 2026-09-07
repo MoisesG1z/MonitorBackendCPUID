@@ -45,28 +45,51 @@ def get_system_info():
         try:
             out_b = subprocess.check_output('wmic csproduct get vendor', shell=True).decode()
             lines = [l.strip() for l in out_b.splitlines() if l.strip()]
-            if len(lines) > 1 and lines[1]: brand = lines[1]
+            if len(lines) > 1 and lines[1] and lines[1] not in ['To be filled by O.E.M.', 'System manufacturer']:
+                brand = lines[1]
         except:
             brand = "PC Generico"
+
         try:
             out_m = subprocess.check_output('wmic csproduct get name', shell=True).decode()
             lines = [l.strip() for l in out_m.splitlines() if l.strip()]
-            if len(lines) > 1 and lines[1]: model = lines[1]
+            if len(lines) > 1 and lines[1] and lines[1] not in ['To be filled by O.E.M.', 'System Product Name']:
+                model = lines[1]
         except:
             model = "Windows PC"
+
+        # Windows Serial Number Brute Force (BIOS -> BaseBoard -> CSProduct -> OS Serial)
         try:
             out_s = subprocess.check_output('wmic bios get serialnumber', shell=True).decode()
             lines = [l.strip() for l in out_s.splitlines() if l.strip()]
-            if len(lines) > 1 and lines[1] and lines[1] != 'To be filled by O.E.M.': serial = lines[1]
-        except:
-            pass
+            if len(lines) > 1 and lines[1] and lines[1] not in ['To be filled by O.E.M.', 'Default string', '0', '00000000', 'None']:
+                serial = lines[1]
+        except: pass
+
         if serial == "No disponible":
             try:
                 out_b = subprocess.check_output('wmic baseboard get serialnumber', shell=True).decode()
                 lines = [l.strip() for l in out_b.splitlines() if l.strip()]
-                if len(lines) > 1 and lines[1]: serial = lines[1]
-            except:
-                pass
+                if len(lines) > 1 and lines[1] and lines[1] not in ['To be filled by O.E.M.', 'Default string', '0', '00000000', 'None']:
+                    serial = lines[1]
+            except: pass
+
+        if serial == "No disponible":
+            try:
+                out_c = subprocess.check_output('wmic csproduct get identifyingnumber', shell=True).decode()
+                lines = [l.strip() for l in out_c.splitlines() if l.strip()]
+                if len(lines) > 1 and lines[1] and lines[1] not in ['To be filled by O.E.M.', 'Default string', '0', '00000000', 'None']:
+                    serial = lines[1]
+            except: pass
+
+        if serial == "No disponible":
+            try:
+                out_os = subprocess.check_output('wmic os get serialnumber', shell=True).decode()
+                lines = [l.strip() for l in out_os.splitlines() if l.strip()]
+                if len(lines) > 1 and lines[1]:
+                    serial = f"WIN-{lines[1]}"
+            except: pass
+
         os_name = f"Windows {platform.release()}"
         arch = platform.architecture()[0]
 
@@ -188,7 +211,6 @@ def get_cpu_info():
         system = platform.system()
 
         if system == "Linux":
-            # 1. Read /proc/cpuinfo for Model Name
             try:
                 with open('/proc/cpuinfo', 'r') as f:
                     for line in f:
@@ -197,7 +219,6 @@ def get_cpu_info():
                             break
             except: pass
             
-            # 2. lscpu fallback
             if not brand_string:
                 try:
                     out = subprocess.check_output("lscpu 2>/dev/null | grep 'Model name:'", shell=True).decode()
@@ -220,9 +241,7 @@ def get_cpu_info():
         if not brand_string or brand_string.lower() in ["x86_64", "i386", "arm64", "unknown"]:
             brand_string = platform.processor() or "Procesador Intel / AMD"
 
-        # Clean extra whitespace
         brand_string = re.sub(r'\s+', ' ', brand_string).strip()
-
         gen = get_cpu_generation(brand_string)
 
         return {
@@ -265,8 +284,9 @@ def get_ram_info():
 def get_storage_info():
     system = platform.system()
     disks_dict = {}
+    drive_to_disk = {}
 
-    # Step 1: Detect physical disks on Linux via lsblk or /sys/block
+    # Step 1: Detect physical disks on Linux via lsblk
     if system == "Linux":
         try:
             out = subprocess.check_output("lsblk -b -P -o NAME,MODEL,VENDOR,SIZE,TYPE,MOUNTPOINT,FSTYPE 2>/dev/null", shell=True).decode()
@@ -301,9 +321,55 @@ def get_storage_info():
                         "smart_status": "OK (S.M.A.R.T)",
                         "partitions": []
                     }
-
         except Exception as e:
             print(f"Error in lsblk execution: {e}")
+
+    # Step 1b: Detect physical disks on Windows via WMIC + LogicalDiskToPartition
+    elif system == "Windows":
+        try:
+            # Query Win32_DiskDrive
+            out_disk = subprocess.check_output('wmic diskdrive get DeviceID,Model,Size,Caption /format:csv', shell=True).decode()
+            for line in out_disk.splitlines():
+                line = line.strip()
+                if not line or line.startswith('Node'): continue
+                parts = line.split(',')
+                # Format: Node, Caption, DeviceID, Model, Size
+                if len(parts) >= 5:
+                    caption = parts[1].strip()
+                    dev_id = parts[2].strip()
+                    model = parts[3].strip() or caption
+                    try:
+                        size_bytes = int(parts[4].strip())
+                        size_gb = round(size_bytes / (1024**3), 2)
+                    except: size_gb = 0
+
+                    if dev_id and model:
+                        full_name = f"{model} ({size_gb} GB)" if size_gb > 0 else model
+                        disks_dict[dev_id] = {
+                            "disk_name": full_name,
+                            "device": dev_id,
+                            "health_percent": 100,
+                            "smart_status": "OK (S.M.A.R.T)",
+                            "partitions": []
+                        }
+
+            # Query LogicalDiskToPartition to map drive letters (C:, G:) to PHYSICALDRIVE
+            out_map = subprocess.check_output('wmic path Win32_LogicalDiskToPartition get Antecedent,Dependent /format:csv', shell=True).decode()
+            for line in out_map.splitlines():
+                if not line or line.startswith('Node'): continue
+                parts = line.split(',')
+                if len(parts) >= 3:
+                    antecedent = parts[1]
+                    dependent = parts[2]
+                    disk_match = re.search(r'Disk #(\d+)', antecedent)
+                    drive_match = re.search(r'([A-Z]:)', dependent, re.IGNORECASE)
+                    if disk_match and drive_match:
+                        disk_num = disk_match.group(1)
+                        drive_letter = drive_match.group(1).upper()
+                        phys_dev = f"\\\\.\\PHYSICALDRIVE{disk_num}"
+                        drive_to_disk[drive_letter] = phys_dev
+        except Exception as e:
+            print(f"Windows physical disk detection error: {e}")
 
     # Step 2: Extract mounted partitions with psutil & map to physical disk
     partitions = psutil.disk_partitions(all=False)
@@ -331,21 +397,28 @@ def get_storage_info():
             # Find which physical disk container this partition belongs to
             target_disk_key = None
 
-            # Check direct match or parent disk regex (/dev/sda1 -> /dev/sda, /dev/nvme0n1p1 -> /dev/nvme0n1)
-            parent_dev = re.sub(r'p?\d+$', '', p.device)
-            
-            if p.device in disks_dict:
-                target_disk_key = p.device
-            elif parent_dev in disks_dict:
-                target_disk_key = parent_dev
-            elif p.device.startswith('/dev/mapper/') or 'mapper' in p.device:
-                target_disk_key = next(iter(disks_dict.keys()), None) if disks_dict else None
+            if system == "Windows":
+                # Drive letter matching (e.g. C: -> \\.\PHYSICALDRIVE0)
+                drive_letter = p.mountpoint[:2].upper() if len(p.mountpoint) >= 2 else ""
+                if drive_letter in drive_to_disk and drive_to_disk[drive_letter] in disks_dict:
+                    target_disk_key = drive_to_disk[drive_letter]
+            else:
+                # Linux / Darwin matching
+                parent_dev = re.sub(r'p?\d+$', '', p.device)
+                if p.device in disks_dict:
+                    target_disk_key = p.device
+                elif parent_dev in disks_dict:
+                    target_disk_key = parent_dev
+                elif p.device.startswith('/dev/mapper/') or 'mapper' in p.device:
+                    target_disk_key = next(iter(disks_dict.keys()), None) if disks_dict else None
 
             # Fallback if no pre-registered physical disk matched
             if not target_disk_key:
-                disk_label = parent_dev if system == "Linux" else p.device
-                if system == "Linux":
-                    short_dev = os.path.basename(parent_dev)
+                disk_label = p.mountpoint
+                if system == "Windows":
+                    disk_label = f"Disco Físico ({p.mountpoint})"
+                elif system == "Linux":
+                    short_dev = os.path.basename(re.sub(r'p?\d+$', '', p.device))
                     model_path = f"/sys/block/{short_dev}/device/model"
                     vendor_path = f"/sys/block/{short_dev}/device/vendor"
                     model_str = ""
@@ -358,13 +431,13 @@ def get_storage_info():
                             with open(vendor_path, 'r') as f: model_str = f"{f.read().strip()} {model_str}".strip()
                         except: pass
                     if model_str:
-                        disk_label = f"{model_str} ({parent_dev})"
+                        disk_label = f"{model_str} ({short_dev})"
                     else:
-                        disk_label = f"Dispositivo de Almacenamiento ({parent_dev})"
+                        disk_label = f"Dispositivo de Almacenamiento ({p.device})"
                 elif system == "Darwin":
                     disk_label = "Disco Almacenamiento Principal (SSD)"
 
-                target_disk_key = parent_dev if parent_dev else p.device
+                target_disk_key = p.mountpoint
                 if target_disk_key not in disks_dict:
                     disks_dict[target_disk_key] = {
                         "disk_name": disk_label,
@@ -374,10 +447,8 @@ def get_storage_info():
                         "partitions": []
                     }
 
-            # Add partition to target disk
             disks_dict[target_disk_key]["partitions"].append(part_info)
 
-            # Update health status based on partition space
             if percent > 95:
                 disks_dict[target_disk_key]["health_percent"] = 30
                 disks_dict[target_disk_key]["smart_status"] = "Crítico (Espacio)"
@@ -390,7 +461,6 @@ def get_storage_info():
         except Exception as e:
             print(f"Error reading partition {p.device}: {e}")
 
-    # Remove any disk entry with 0 partitions
     final_disks = [d for d in disks_dict.values() if len(d["partitions"]) > 0]
     return final_disks
 
@@ -473,25 +543,31 @@ def get_gpu_info():
                 gpus.append({"name": chip_name, "load": 0, "memoryTotal": 1536, "memoryUsed": 0})
         except: pass
 
-    # 4. Windows Brute Force (WMIC)
+    # 4. Windows Brute Force (WMIC / PowerShell)
     if not gpus and system == "Windows":
         try:
-            out = subprocess.check_output('wmic path win32_VideoController get name,AdapterRAM', shell=True).decode()
-            lines = [l.strip() for l in out.splitlines() if l.strip()]
-            for line in lines[1:]:
-                parts = line.rsplit(None, 1)
-                if len(parts) == 2:
-                    name = parts[0]
+            out = subprocess.check_output('wmic path win32_VideoController get name,AdapterRAM /format:csv', shell=True).decode()
+            for line in out.splitlines():
+                line = line.strip()
+                if not line or line.startswith('Node'): continue
+                parts = line.split(',')
+                # Format: Node, AdapterRAM, Name
+                if len(parts) >= 3:
+                    name = parts[2].strip()
+                    # Clean up leading numbers like "0 VirtualBox..."
+                    name = re.sub(r'^\d+\s+', '', name).strip()
                     try:
-                        ram_bytes = int(parts[1])
+                        ram_bytes = int(parts[1].strip())
                         ram_mb = round(ram_bytes / (1024 * 1024))
                     except: ram_mb = 0
-                    gpus.append({
-                        "name": name,
-                        "load": 0,
-                        "memoryTotal": ram_mb,
-                        "memoryUsed": 0
-                    })
+
+                    if name:
+                        gpus.append({
+                            "name": name,
+                            "load": 0,
+                            "memoryTotal": ram_mb,
+                            "memoryUsed": 0
+                        })
         except: pass
 
     if not gpus:
