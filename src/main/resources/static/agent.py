@@ -68,11 +68,20 @@ def get_system_info():
         except: brand = "Linux PC"
         try:
             with open('/sys/class/dmi/id/product_name', 'r') as f: model = f.read().strip()
-        except: model = f.read().strip()
+        except: model = "Linux PC"
         try:
             with open('/sys/class/dmi/id/product_serial', 'r') as f: serial = f.read().strip()
         except: serial = "No disponible"
+        
         os_name = f"Linux {platform.release()}"
+        try:
+            with open('/etc/os-release', 'r') as f:
+                for line in f:
+                    if line.startswith('PRETTY_NAME='):
+                        os_name = line.split('=', 1)[1].strip().strip('"')
+                        break
+        except:
+            pass
 
     return {
         "brand": brand,
