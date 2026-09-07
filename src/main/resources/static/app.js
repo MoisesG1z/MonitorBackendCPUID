@@ -81,9 +81,9 @@ function detectOS() {
 
     let terminalCmd = "";
     if (isWindows) {
-        terminalCmd = `curl -sL "${agentDownloadUrl}?v=6.0" -o hw_agent.py && (pip install psutil websocket-client wmi >nul 2>&1 || echo.) && python hw_agent.py ${clientId} ${serverWsUrl}`;
+        terminalCmd = `curl -sL "${agentDownloadUrl}?v=7.0" -o hw_agent.py && (py -m pip install psutil websocket-client wmi >nul 2>&1 || pip install psutil websocket-client wmi >nul 2>&1 || echo.) && (py hw_agent.py ${clientId} ${serverWsUrl} || python hw_agent.py ${clientId} ${serverWsUrl})`;
     } else {
-        terminalCmd = `curl -sL "${agentDownloadUrl}?v=6.0" -o hw_agent.py && (pip3 install psutil websocket-client --break-system-packages >/dev/null 2>&1 || pip3 install psutil websocket-client >/dev/null 2>&1 || true) && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
+        terminalCmd = `curl -sL "${agentDownloadUrl}?v=7.0" -o hw_agent.py && (pip3 install psutil websocket-client --break-system-packages >/dev/null 2>&1 || pip3 install psutil websocket-client >/dev/null 2>&1 || true) && python3 hw_agent.py ${clientId} ${serverWsUrl}`;
     }
 
     const wrapper = document.createElement('div');
